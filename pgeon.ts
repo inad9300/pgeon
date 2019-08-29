@@ -5,6 +5,8 @@ import * as path from 'path'
 import * as pg from 'pg'
 import * as ts from 'typescript'
 
+// import 'reflect-metadata'
+
 // Source: https://github.com/pgjdbc/pgjdbc/blob/master/pgjdbc/src/main/java/org/postgresql/core/Oid.java.
 enum PgTypeId {
     BIT = 1560,
@@ -110,17 +112,49 @@ function filesEndingWith(dir: string, ends: string[], result: string[] = []) {
 // }
 
 const pool = new pg.Pool // TODO Auth.?
-const program = ts.createProgram([], {})
-const typeChecker = program.getTypeChecker()
 
-function scanFile(sourceFile: ts.SourceFile) {
+function getTypeObject(typeChecker: ts.TypeChecker, properties: ts.Symbol[]) {
+    return properties.map(prop => ({
+        field: prop.getName(),
+        optional: !!(prop.flags & ts.SymbolFlags.Optional),
+        type: typeChecker.typeToString(
+            typeChecker.getTypeFromTypeNode(prop.valueDeclaration.type)
+        )
+    }))
+}
+
+function scanFile(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
     scanNode(sourceFile)
 
     function scanNode(node: ts.Node) {
+        // console.debug('node.kind', ts.SyntaxKind[node.kind])
+
+        if (ts.isTaggedTemplateExpression(node)) {
+            if (node.tag.expression.name.getText() !== '$query') {
+                return
+            }
+
+            // console.debug('Tagged template node', node)
+        }
+
+        if (ts.isTypeNode(node) && node.getText() === 'User') {
+            const userType = typeChecker.getTypeFromTypeNode(node)
+            const props = userType.getProperties() // Alternatively: userType.members
+
+            // getApparentProperties
+
+            // props[1].valueDeclaration.type.kind === ts.SyntaxKind.StringKeyword
+            // props[0].getDeclarations()[0] === props[0].valueDeclaration
+            console.debug(
+                'User',
+                getTypeObject(typeChecker, props)
+            )
+        }
+
+        /*
         if (node.kind === ts.SyntaxKind.Identifier
             && node.getText() === '$query'
             && ts.isTaggedTemplateExpression(node.parent)) {
-            console.log('$query!')
 
             const parent = node.parent as ts.TaggedTemplateExpression
             const query = parent.template.getText().trim().slice(1, -1)
@@ -211,6 +245,7 @@ function scanFile(sourceFile: ts.SourceFile) {
             //         return
             //     })
         }
+        */
 
         ts.forEachChild(node, scanNode)
     }
@@ -223,6 +258,7 @@ function scanFile(sourceFile: ts.SourceFile) {
 }
 
 const args = process.argv.slice(2)
+console.debug('args', args)
 
 switch (args[0]) {
 
@@ -238,14 +274,15 @@ Usage:
 case 'scan': {
     const dir = args[1] || process.cwd()
 
-    for (const fileName of filesEndingWith(dir, ['.ts', '.tsx'])) {
+    // TODO Scan .ts and .tsx files, but not .d.ts files.
+    const fileNames = filesEndingWith(dir, ['example.ts'])
+    const program = ts.createProgram(fileNames, {})
+    const typeChecker = program.getTypeChecker()
+
+    for (const fileName of fileNames) {
         scanFile(
-            ts.createSourceFile(
-                fileName,
-                fs.readFileSync(fileName).toString(),
-                ts.ScriptTarget.ES2015,
-                true
-            )
+            program.getSourceFile(fileName)!,
+            typeChecker
         )
     }
 

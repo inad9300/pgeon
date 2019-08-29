@@ -1,10 +1,8 @@
 import {Client, Pool, QueryResult, QueryConfig} from 'pg'
 
-// TODO Think about pg's custom parser role.
-type Column = any // null | boolean | number | string | Date | Uint8Array
+type Row = {[column: string]: any}
 
-type Row = {[column: string]: Column}
-
+// TODO Next version of public types will make this declaration redundant.
 interface $QueryResult<R extends Row> extends QueryResult {
     rows: R[]
 }
@@ -14,13 +12,13 @@ type $QueryConfig = Omit<QueryConfig, 'text' | 'values'>
 
 declare module 'pg' {
     export interface Client {
-        $query<R extends Row>(queryParts: TemplateStringsArray, ...values: Column[]): Promise<$QueryResult<R>>
-        $query<R extends Row>(queryConfig: $QueryConfig): ((queryParts: TemplateStringsArray, ...values: Column[]) => Promise<$QueryResult<R>>)
+        $query<R extends Row>(queryParts: TemplateStringsArray, ...values: any[]): Promise<$QueryResult<R>>
+        $query<R extends Row>(queryConfig: $QueryConfig): ((queryParts: TemplateStringsArray, ...values: any[]) => Promise<$QueryResult<R>>)
     }
 
     export interface Pool {
-        $query<R extends Row>(queryParts: TemplateStringsArray, ...values: Column[]): Promise<$QueryResult<R>>
-        $query<R extends Row>(queryConfig: $QueryConfig): ((queryParts: TemplateStringsArray, ...values: Column[]) => Promise<$QueryResult<R>>)
+        $query<R extends Row>(queryParts: TemplateStringsArray, ...values: any[]): Promise<$QueryResult<R>>
+        $query<R extends Row>(queryConfig: $QueryConfig): ((queryParts: TemplateStringsArray, ...values: any[]) => Promise<$QueryResult<R>>)
     }
 }
 
@@ -43,13 +41,13 @@ function getQueryText(queryParts: TemplateStringsArray) {
  * string is static, thus allowing to distinguish between static and dynamic queries. Additionally,
  * in-line arguments minimize indexing mistakes between the query placeholders and the arguments.
  */
-function $query<R extends Row>(this: Client | Pool, queryParts: TemplateStringsArray, ...values: Column[]): Promise<$QueryResult<R>>
-function $query<R extends Row>(this: Client | Pool, queryConfig: $QueryConfig): ((queryParts: TemplateStringsArray, ...values: Column[]) => Promise<$QueryResult<R>>)
-function $query<R extends Row>(this: Client | Pool, queryPartsOrQueryConfig: TemplateStringsArray | $QueryConfig, ...valuesOrNothing: Column[]): Promise<$QueryResult<R>> | ((queryParts: TemplateStringsArray, ...values: Column[]) => Promise<$QueryResult<R>>) {
+function $query<R extends Row>(this: Client | Pool, queryParts: TemplateStringsArray, ...values: any[]): Promise<$QueryResult<R>>
+function $query<R extends Row>(this: Client | Pool, queryConfig: $QueryConfig): ((queryParts: TemplateStringsArray, ...values: any[]) => Promise<$QueryResult<R>>)
+function $query<R extends Row>(this: Client | Pool, queryPartsOrQueryConfig: TemplateStringsArray | $QueryConfig, ...valuesOrNothing: any[]): Promise<$QueryResult<R>> | ((queryParts: TemplateStringsArray, ...values: any[]) => Promise<$QueryResult<R>>) {
     if (isArray(queryPartsOrQueryConfig)) {
         return this.query(getQueryText(queryPartsOrQueryConfig), valuesOrNothing)
     } else {
-        return (queryParts: TemplateStringsArray, ...values: Column[]): Promise<$QueryResult<R>> =>
+        return (queryParts: TemplateStringsArray, ...values: any[]): Promise<$QueryResult<R>> =>
             this.query({...queryPartsOrQueryConfig, text: getQueryText(queryParts), values})
     }
 }
