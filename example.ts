@@ -10,18 +10,20 @@ const pool = new pg.Pool
     }
 
     interface User {
-        id: int
+        id: undefined | int | string
         name: string
         S: String
+        bi: BigInt
         things?: any[]
         others: Array<symbol>
         b: B
         d: Date
-        u: Uint8Array | null
+        u: number | null | Uint8Array | null
     }
 
+    // const {$query} = pool
     const id = 5
-    const users = await pool.$query<User>({})`
+    const users = await pool.$query<User>/*({})*/`
         select *
         from users
         where id = ${id}

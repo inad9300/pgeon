@@ -5,8 +5,6 @@ import * as path from 'path'
 import * as pg from 'pg'
 import * as ts from 'typescript'
 
-// import 'reflect-metadata'
-
 // Source: https://github.com/pgjdbc/pgjdbc/blob/master/pgjdbc/src/main/java/org/postgresql/core/Oid.java.
 enum PgTypeId {
     BIT = 1560,
@@ -71,6 +69,8 @@ enum PgTypeId {
     XML_ARRAY = 143
 }
 
+// TODO Consider reversing map. Include BigInt, wrapper types, etc.
+
 const pgToJsType = {
     [PgTypeId.BOOL]: Boolean,
     [PgTypeId.INT2]: Number,
@@ -113,14 +113,37 @@ function filesEndingWith(dir: string, ends: string[], result: string[] = []) {
 
 const pool = new pg.Pool // TODO Auth.?
 
-function getTypeObject(typeChecker: ts.TypeChecker, properties: ts.Symbol[]) {
-    return properties.map(prop => ({
-        field: prop.getName(),
-        optional: !!(prop.flags & ts.SymbolFlags.Optional),
-        type: typeChecker.typeToString(
-            typeChecker.getTypeFromTypeNode(prop.valueDeclaration.type)
-        )
-    }))
+function getTypeInfo(typeChecker: ts.TypeChecker, typeNode: ts.TypeNode) {
+    return typeChecker
+        .getTypeFromTypeNode(typeNode)
+        .getProperties()
+        .map(prop => {
+            const {valueDeclaration} = prop
+            if (!valueDeclaration || !ts.isPropertySignature(valueDeclaration) || !valueDeclaration.type) {
+                throw new Error(
+                    `Property "${typeNode.getText()}.${prop.getName()}" doesn't have a supported value declaration.`
+                )
+            }
+            const rawType = typeChecker.typeToString(
+                typeChecker.getTypeFromTypeNode(valueDeclaration.type)
+            )
+            const explicitlyOptional = !!(prop.flags & ts.SymbolFlags.Optional)
+            const implicitlyOptional = rawType.endsWith(' | undefined') || rawType.endsWith(' | null')
+            const type = implicitlyOptional ? rawType.substr(0, rawType.lastIndexOf(' | ')) : rawType
+            return {
+                field: prop.getName(),
+                optional: explicitlyOptional || implicitlyOptional,
+                type
+            }
+        })
+}
+
+function debug(node: ts.Node) {
+    console.debug({
+        ...node,
+        parent: null,
+        kind: ts.SyntaxKind[node.kind]
+    })
 }
 
 function scanFile(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
@@ -129,36 +152,22 @@ function scanFile(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
     function scanNode(node: ts.Node) {
         // console.debug('node.kind', ts.SyntaxKind[node.kind])
 
-        if (ts.isTaggedTemplateExpression(node)) {
-            if (node.tag.expression.name.getText() !== '$query') {
-                return
+        // TODO Improve regular expression, as it matches (e.g.) "$$query".
+        if (ts.isTaggedTemplateExpression(node) && /\B\$query\b/.test(node.tag.getText())) {
+            const {typeArguments} = node
+            if (!typeArguments || typeArguments.length !== 1) {
+                throw new Error(`Unsupported number of generic types spotted in "$query" tagged template.`)
             }
 
-            // console.debug('Tagged template node', node)
-        }
+            const typeInfo = getTypeInfo(typeChecker, typeArguments[0])
+            const rawQuery = node.template.getText().slice(1, -1).trim()
 
-        if (ts.isTypeNode(node) && node.getText() === 'User') {
-            const userType = typeChecker.getTypeFromTypeNode(node)
-            const props = userType.getProperties() // Alternatively: userType.members
+            console.debug(typeInfo)
+            console.debug(rawQuery)
 
-            // getApparentProperties
+            // TODO Replace placeholders in `rawQuery`, e.g. via `eval()` plus catching `ReferenceError`s.
 
-            // props[1].valueDeclaration.type.kind === ts.SyntaxKind.StringKeyword
-            // props[0].getDeclarations()[0] === props[0].valueDeclaration
-            console.debug(
-                'User',
-                getTypeObject(typeChecker, props)
-            )
-        }
-
-        /*
-        if (node.kind === ts.SyntaxKind.Identifier
-            && node.getText() === '$query'
-            && ts.isTaggedTemplateExpression(node.parent)) {
-
-            const parent = node.parent as ts.TaggedTemplateExpression
-            const query = parent.template.getText().trim().slice(1, -1)
-
+            /*
             pool.query(`select * from (${query}) x limit 0`).then(res => {
                 // TODO Verify the function's declared return type and the actual return type match.
                 console.debug(
@@ -176,76 +185,8 @@ function scanFile(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
                 // const properties = typeChecker.getPropertiesOfType(type)
                 // typeChecker.typeToString(signature.getReturnType())
             })
-
-            // Get query source.
-
-            // let querySrc = parent.template.getText()
-            // let query: string
-            // while (true) {
-            //     try {
-            //         query = eval(querySrc)
-            //         break
-            //     } catch (err) {
-            //         // TODO Any expression could be used inside the placeholders.
-            //         if (err instanceof ReferenceError) {
-            //             const undefinedVar = err.message.split(' ')[0]
-            //             if (!/^[_a-zA-Z][_a-zA-Z0-9]+$/.test(undefinedVar)) {
-            //                 console.warn(`Failed to capture undefined variable in query. Captured value: "${undefinedVar}".`)
-            //                 return
-            //             }
-            //             querySrc = `let ${undefinedVar} = null; ` + querySrc
-            //             continue
-            //         }
-            //         console.warn(`Failed to evaluate query source in ${nodeRef(node)}: ${err.message}`)
-            //         return
-            //     }
-            // }
-
-            // Look for syntatic errors.
-
-            // const {query: ast, error: err} = pg.parse(query)
-            // if (err) {
-            //     console.error(
-            //         `Syntactic error in ${nodeRef(node)}: ${err.message}`,
-            //         errMsg(query, err.cursorPosition - 1)
-            //     )
-            //     return
-            // }
-
-            // Look for semantic and type errors.
-
-            // pool.query('explain (verbose true) ' + query)
-            //     .then(() => {
-            //         if (ast[0].SelectStmt) {
-            //             pool.query(`select * from (${query}) x limit 0`).then(res => {
-            //                 // TODO Verify the function's declared return type and the actual return type match.
-            //                 console.debug(
-            //                     res.fields.map(f => ({
-            //                         name: f.name,
-            //                         type: pgToJsType[f.dataTypeID]
-            //                     }))
-            //                 )
-            //
-            //                 // FIXME Gives `TypeError: Cannot read property 'exports' of undefined` from deep inside TypeScript.
-            //                 const signature = typeChecker.getResolvedSignature(parent)
-            //                 console.debug('signature', signature)
-            //
-            //                 // const type = typeChecker.getTypeFromTypeNode(node.typeArguments[0])
-            //                 // const properties = typeChecker.getPropertiesOfType(type)
-            //                 // typeChecker.typeToString(signature.getReturnType())
-            //             })
-            //             .catch(console.error)
-            //         }
-            //     })
-            //     .catch((err: Error & {position: number}) => {
-            //         console.error(
-            //             `Semantic error in ${nodeRef(node)}: ${err.message}`,
-            //             errMsg(query, err.position - 1)
-            //         )
-            //         return
-            //     })
+            */
         }
-        */
 
         ts.forEachChild(node, scanNode)
     }
@@ -258,7 +199,6 @@ function scanFile(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
 }
 
 const args = process.argv.slice(2)
-console.debug('args', args)
 
 switch (args[0]) {
 
@@ -276,7 +216,9 @@ case 'scan': {
 
     // TODO Scan .ts and .tsx files, but not .d.ts files.
     const fileNames = filesEndingWith(dir, ['example.ts'])
-    const program = ts.createProgram(fileNames, {})
+    const program = ts.createProgram(fileNames, {
+        strictNullChecks: true
+    })
     const typeChecker = program.getTypeChecker()
 
     for (const fileName of fileNames) {
