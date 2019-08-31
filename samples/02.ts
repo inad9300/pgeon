@@ -21,15 +21,15 @@ const pool = new pg.Pool
         u: number | null | Uint8Array | null
     }
 
-    // const {$query} = pool
+    const {$query} = pool
     const id = 5
-    const users = await pool.$query<User>/*({})*/`
+    const users = await pool.$query<User>({})`
         select *
         from users
-        where id = ${id}
-        and 1 = 2
-        and id = ${id}
-        and 3 = 4
+        where id = ${id + `${0 * 2}` + id}
+        and 1 = 1
+        and id in (${id - 5})
+        and 2 = 2
     `
 
     console.log(users)

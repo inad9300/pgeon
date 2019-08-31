@@ -1,9 +1,11 @@
 {
-    "private": true,
+    "name": "pgeon",
+    "version": "0.0.1",
+    "description": "Extension and static analyzer for node-postgres.",
     "scripts": {
         "compile": "tsc",
         "watch": "tsc --watch",
-        "scan": "node ./bin/pgeon.js scan ."
+        "scan": "node ./bin/pgeon.cli.js scan ."
     },
     "peerDependencies": {
         "pg": ">=7.5.0"
