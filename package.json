@@ -3,17 +3,16 @@
     "version": "0.0.1",
     "description": "Extension and static analyzer for node-postgres.",
     "scripts": {
-        "compile": "tsc",
-        "watch": "tsc --watch",
-        "scan": "node ./bin/pgeon.cli.js scan ."
+        "start": "tsc --watch",
+        "test": "node ./bin/pgeon.cli.js scan tests/"
     },
     "peerDependencies": {
         "pg": ">=7.5.0",
         "typescript": ">=3.1.6"
     },
     "devDependencies": {
-        "@types/node": "12.7.2",
-        "@types/pg": "7.11.0",
+        "@types/node": "12.7.4",
+        "@types/pg": "7.11.1",
         "pg": "7.12.1",
         "typescript": "3.6.2"
     },

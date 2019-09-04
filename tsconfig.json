@@ -2,17 +2,23 @@
     "compilerOptions": {
         "outDir": "bin",
         "target": "es5",
+        "lib": ["ESNext"],
         "module": "commonjs",
         "moduleResolution": "node",
         "sourceMap": true,
         "declaration": true,
         "strict": true,
         "noImplicitReturns": true,
-        // "noUnusedLocals": true,
-        // "noUnusedParameters": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
         "noFallthroughCasesInSwitch": true,
         "forceConsistentCasingInFileNames": true,
         "experimentalDecorators": true,
         "emitDecoratorMetadata": true
-    }
+    },
+    "exclude": [
+        "bin/",
+        "node_modules/",
+        "tests/"
+    ]
 }

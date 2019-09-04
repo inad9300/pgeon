@@ -68,34 +68,16 @@ enum PgTypeId {
     XML_ARRAY = 143
 }
 
-const pgToJsType = {
-    [PgTypeId.BOOL]: ['boolean', 'Boolean'],
-    [PgTypeId.INT2]: ['number', 'Number', 'BigInt'],
-    [PgTypeId.INT4]: ['number', 'Number', 'BigInt'],
-    [PgTypeId.INT8]: ['number', 'Number', 'BigInt'],
-    [PgTypeId.FLOAT4]: ['number', 'Number', 'BigInt'],
-    [PgTypeId.FLOAT8]: ['number', 'Number', 'BigInt'],
-    [PgTypeId.NUMERIC]: ['number', 'Number', 'BigInt'],
-    [PgTypeId.TEXT]: ['string', 'String'],
-    [PgTypeId.CHAR]: ['string', 'String'],
-    [PgTypeId.BPCHAR]: ['string', 'String'],
-    [PgTypeId.VARCHAR]: ['string', 'String'],
-    [PgTypeId.DATE]: ['Date'],
-    [PgTypeId.TIMESTAMP]: ['Date'],
-    [PgTypeId.TIMESTAMPTZ]: ['Date'],
-    [PgTypeId.BYTEA]: ['Uint8Array']
-}
-
-const jsToPgType = {
-    'boolean': [PgTypeId.BOOL],
-    'Boolean': [PgTypeId.BOOL],
-    'number': [PgTypeId.INT2, PgTypeId.INT4, PgTypeId.INT8, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
-    'Number': [PgTypeId.INT2, PgTypeId.INT4, PgTypeId.INT8, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
-    'BigInt': [PgTypeId.INT2, PgTypeId.INT4, PgTypeId.INT8, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
-    'string': [PgTypeId.TEXT, PgTypeId.CHAR, PgTypeId.BPCHAR, PgTypeId.VARCHAR],
-    'String': [PgTypeId.TEXT, PgTypeId.CHAR, PgTypeId.BPCHAR, PgTypeId.VARCHAR],
-    'Date': [PgTypeId.DATE, PgTypeId.TIMESTAMP, PgTypeId.TIMESTAMPTZ],
-    'Uint8Array': [PgTypeId.BYTEA]
+const jsToPgType: {[jsType: string]: PgTypeId[]} = {
+  'boolean': [PgTypeId.BOOL],
+  'Boolean': [PgTypeId.BOOL],
+  'Uint8Array': [PgTypeId.BYTEA],
+  'string': [PgTypeId.CHAR, PgTypeId.TEXT, PgTypeId.BPCHAR, PgTypeId.VARCHAR],
+  'String': [PgTypeId.CHAR, PgTypeId.TEXT, PgTypeId.BPCHAR, PgTypeId.VARCHAR],
+  'number': [PgTypeId.INT8, PgTypeId.INT2, PgTypeId.INT4, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
+  'Number': [PgTypeId.INT8, PgTypeId.INT2, PgTypeId.INT4, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
+  'BigInt': [PgTypeId.INT8, PgTypeId.INT2, PgTypeId.INT4, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
+  'Date': [PgTypeId.DATE, PgTypeId.TIMESTAMP, PgTypeId.TIMESTAMPTZ]
 }
 
 export function filesEndingWith(dir: string, include: string[], exclude: string[], result: string[] = []) {
@@ -111,8 +93,7 @@ export function filesEndingWith(dir: string, include: string[], exclude: string[
 }
 
 type FieldMap<T> = {
-    [name: string]: {
-        name: string
+    [fieldName: string]: {
         dataType: T
         isNullable: boolean
     }
@@ -127,7 +108,7 @@ export function getTypeFields(typeChecker: ts.TypeChecker, typeNode: ts.TypeNode
         .map(prop => {
             const {valueDeclaration} = prop
             if (!valueDeclaration || !ts.isPropertySignature(valueDeclaration) || !valueDeclaration.type) {
-                throw new Error(`Property "${typeNode.getText()}.${prop.getName()}" doesn't have a supported value declaration.`)
+                throw new Error(`field "${typeNode.getText()}.${prop.getName()}" does not have a supported value declaration`)
             }
             const rawType = typeChecker.typeToString(
                 typeChecker.getTypeFromTypeNode(valueDeclaration.type)
@@ -137,7 +118,6 @@ export function getTypeFields(typeChecker: ts.TypeChecker, typeNode: ts.TypeNode
             const dataType = implicitlyOptional ? rawType.substr(0, rawType.lastIndexOf(' | ')) : rawType
 
             typeFields[prop.getName()] = {
-                name: prop.getName(),
                 dataType,
                 isNullable: explicitlyOptional || implicitlyOptional
             }
@@ -168,14 +148,16 @@ export async function scanFiles(fileNames: string[]) {
     const typeChecker = program.getTypeChecker()
 
     // TODO Read config from environamental variables.
-    // TODO For nullability, metadata tables must be read.
+    // TODO For nullability, metadata tables would need to be read... But not only columns are returned! :O
     const db = new pg.Client(config)
     db.connect()
 
     try {
         for (const fileName of fileNames) {
+            const sourceFile = program.getSourceFile(fileName)!
             await scanNode(
-                program.getSourceFile(fileName)!,
+                sourceFile,
+                sourceFile,
                 typeChecker,
                 db
             )
@@ -188,86 +170,109 @@ export async function scanFiles(fileNames: string[]) {
     }
 }
 
-export async function scanNode(node: ts.Node, typeChecker: ts.TypeChecker, db: pg.Client) {
-    // TODO Improve regular expression, as the current one matches (e.g.) "$$query".
-    if (ts.isTaggedTemplateExpression(node) && /\B\$query\b/.test(node.tag.getText())) {
-        const {typeArguments} = node
-        // FIXME This fails for `sample/02.ts`.
-        if (!typeArguments || typeArguments.length !== 1) {
-            throw new Error(`Unsupported number of generic types spotted in "$query" tagged template: ${typeArguments ? typeArguments.length : 0}.`)
-        }
-
-        const typeFields = getTypeFields(typeChecker, typeArguments[0])
-
+export async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker, db: pg.Client) {
+    if (ts.isTaggedTemplateExpression(node) && (node.tag.getText().endsWith('.$query') || node.tag.getText().includes('.$query<'))) {
         const {template} = node
-
-        // TODO The query might not have any placeholders, in which case it will not be a template expression.
-        if (!ts.isTemplateExpression(template)) {
-            throw new Error('We lost track of the happy path!')
+        let query: string
+        if (template.kind === ts.SyntaxKind.FirstTemplateToken) {
+            query = template.text
+        } else if (ts.isTemplateExpression(template)) {
+            query = [
+                template.head.text,
+                ...template.templateSpans.map(span => span.literal.text)
+            ].join('null')
+        } else {
+            throw new Error('found `$query` template tag with unsupported template kind')
         }
 
-        const query = [
-            template.head.text,
-            ...template.templateSpans.map(span => span.literal.text)
-        ].join('null')
+        const queryLines = query.replace(/^\n+/g, '').replace(/\s+$/g, '').split('\n')
+        const minIndent = Math.min(...queryLines.map(ql => ql.length - ql.trimStart().length))
+        const indentDiff = 4 - minIndent
 
+        query = queryLines
+            .map(ql => {
+                if (indentDiff > 0) {
+                    return ' '.repeat(indentDiff) + ql
+                } else if (indentDiff < 0) {
+                    return ql.substr(-1 * indentDiff)
+                } else {
+                    return ql
+                }
+            })
+            .join('\n')
+
+        const queryPrefix = 'select * from ('
+        const querySuffix = ') x limit 0'
+
+        let queryRes: pg.QueryResult
         try {
-            const queryRes = await db.query(`select * from (${query}) x limit 0`)
-            const queryFields: FieldMap<PgTypeId> = {}
-            for (const queryField of queryRes.fields) {
-                queryFields[queryField.name] = {
-                    name: queryField.name,
-                    dataType: queryField.dataTypeID,
-                    isNullable: true
-                }
-            }
+            queryRes = await db.query(queryPrefix + query + querySuffix)
+        } catch (err) {
+            console.error(errorMessage(sourceFile, node, err))
+            console.error(errorQuery(query, !err.position ? undefined : err.position - queryPrefix.length - 1))
+            return
+        }
 
-            for (const queryField of Object.values(queryFields)) {
-                const typeField = typeFields[queryField.name]
-                if (!typeField) {
-                    throw new Error(`Field "${queryField.name}" was returned by the query but not declared in the return interface.`)
-                }
-                else {
-                    const validJsTypes = (pgToJsType as any)[queryField.dataType]
-                    if (!validJsTypes.includes(typeField.dataType)) {
-                        throw new Error(`Field "${queryField.name}" was returned with type "${PgTypeId[queryField.dataType]}", but was declared with the incompatible type "${typeField.dataType}".`)
-                    }
-                }
+        const queryFields: FieldMap<PgTypeId> = {}
+        for (const queryField of queryRes.fields) {
+            queryFields[queryField.name] = {
+                dataType: queryField.dataTypeID,
+                isNullable: true
             }
+        }
 
-            for (const typeField of Object.values(typeFields)) {
-                const queryField = queryFields[typeField.name]
-                if (!queryField) {
-                    throw new Error(`Field "${typeField.name}" was declared in the return interface but not declared by the query.`)
-                }
-                else {
-                    const validPgTypes = (jsToPgType as any)[typeField.dataType]
-                    if (!validPgTypes.includes(queryField.dataType)) {
-                        throw new Error(`Field "${typeField.name}" was declared with type "${typeField.dataType}", but returned with the incompatible type "${PgTypeId[queryField.dataType]}".`)
-                    }
+        const typeArguments = node.typeArguments || (node.tag as unknown as ts.NodeWithTypeArguments).typeArguments
+        const typeArgument = typeArguments![0]
+        const typeArgumentName = typeArgument.getText()
+        const typeFields = getTypeFields(typeChecker, typeArgument)
+
+        for (const queryFieldName of Object.keys(queryFields)) {
+            const typeField = typeFields[queryFieldName]
+            if (!typeField) {
+                console.error(errorMessage(sourceFile, node, new Error(
+                    `returned field "${queryFieldName}" was not declared in interface "${typeArgumentName}"`
+                )))
+                console.error(errorQuery(query))
+            }
+        }
+
+        for (const [typeFieldName, typeField] of Object.entries(typeFields)) {
+            const queryField = queryFields[typeFieldName]
+            if (!queryField) {
+                console.error(errorMessage(sourceFile, node, new Error(
+                    `declared field "${typeArgumentName}.${typeFieldName}" was not returned by the query`
+                )))
+                console.error(errorQuery(query))
+            }
+            else {
+                const validPgTypes = (jsToPgType as any)[typeField.dataType]
+                if (!validPgTypes.includes(queryField.dataType)) {
+                    console.error(errorMessage(sourceFile, node, new Error(
+                        `type mismatch in "${typeArgumentName}.${typeFieldName}" – "${typeField.dataType}" and "${PgTypeId[queryField.dataType]}" are incompatible`
+                    )))
+                    console.error(errorQuery(query))
                 }
             }
-        } catch (e) {
-            console.error('Oops! We found a problem with your query!', e)
         }
     }
 
     for (const child of node.getChildren()) {
-        await scanNode(child, typeChecker, db)
+        await scanNode(child, sourceFile, typeChecker, db)
     }
 }
 
-// TODO Ensure double vertical spacing and four spaces of indentation.
-// function errMsg(query: string, errPos?: number): string {
-//     if (!errPos || errPos >= query.length) {
-//         return '\n\x1b[31m' + query + '\x1b[0m\n'
-//     }
-//     return '\n\x1b[31m' + query.substr(0, errPos) + '\x1b[0m'
-//         + '\x1b[103m' + '\x1b[31m' + query[errPos] + '\x1b[0m' + '\x1b[0m'
-//         + '\x1b[31m' + query.substr(errPos + 1) + '\x1b[0m\n'
-// }
+function errorQuery(query: string, errPos?: number) {
+    if (!errPos || errPos >= query.length) {
+        return '\n\x1b[31m' + query + '\x1b[0m\n'
+    } else {
+        return '\n\x1b[31m' + query.substr(0, errPos) + '\x1b[0m'
+            + '\x1b[41m' + '\x1b[30m' + query[errPos] + '\x1b[0m' + '\x1b[0m'
+            + '\x1b[31m' + query.substr(errPos + 1) + '\x1b[0m\n'
+    }
+}
 
-// function nodeRef(node: ts.Node) {
-//     const {line, character} = sourceFile.getLineAndCharacterOfPosition(node.getStart())
-//     return `${sourceFile.fileName}:${line + 1}:${character + 1}`
-// }
+function errorMessage(sourceFile: ts.SourceFile, node: ts.Node, err: Error) {
+    const {line} = sourceFile.getLineAndCharacterOfPosition(node.getStart())
+    const errLocation = `${sourceFile.fileName}:${line + 1}`
+    return `[\x1b[90m${errLocation}\x1b[0m] ${err.message}`
+}

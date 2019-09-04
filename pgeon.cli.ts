@@ -11,26 +11,31 @@ pgeon scan [<dir>] – Scan *.ts and *.tsx files in the given directory (or, by 
 `
 
 ;(async () => {
-    const args = process.argv.slice(2)
-    switch (args[0]) {
-        case 'help': {
-            console.log(help)
-            process.exit(0)
-            break
-        }
-        case 'scan': {
-            const dir = args[1] || process.cwd()
-            await pgeon.scanFiles(
-                pgeon.filesEndingWith(dir, ['01.ts', '.tsx'], ['.d.ts'])
-            )
+    try {
+        const args = process.argv.slice(2)
+        switch (args[0]) {
+            case 'help': {
+                console.log(help)
+                process.exit(0)
+                break
+            }
+            case 'scan': {
+                const dir = args[1] || process.cwd()
+                await pgeon.scanFiles(
+                    pgeon.filesEndingWith(dir, ['.ts', '.tsx'], ['.d.ts'])
+                )
 
-            process.exit(0)
-            break
+                process.exit(0)
+                break
+            }
+            default: {
+                console.error(`Unsupported command: "${args[0]}". Try running \`pgeon help\`.`)
+                process.exit(1)
+                break
+            }
         }
-        default: {
-            console.log(`Unsupported command: "${args[0]}". Try running \`pgeon help\`.`)
-            process.exit(1)
-            break
-        }
+    } catch (err) {
+        console.error(`Unexpected error: ${err.message}`)
+        process.exit(1)
     }
 })()
