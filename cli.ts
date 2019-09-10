@@ -1,8 +1,47 @@
+#!/usr/bin/env node
+
 import * as fs from 'fs'
 import * as path from 'path'
 import * as pg from 'pg'
 import * as ts from 'typescript'
-import {execSync} from 'child_process'
+
+;(async () => {
+    try {
+        const args = process.argv.slice(2)
+        switch (args[0]) {
+            case 'help': {
+                console.log(`
+pgeon – Type checker for PostgreSQL queries written in TypeScript and node-posgres.
+
+··· Commands ···
+
+pgeon scan [<dir>] – Scan *.ts and *.tsx files in the given directory (or, by default, the current working directory) for type errors.
+`)
+                process.exit(0)
+                break
+            }
+            case 'scan': {
+                const dir = args[1] || process.cwd()
+                await scanFiles(filesEndingWith(dir, ['.ts', '.tsx'], ['.d.ts']))
+
+                process.exit(0)
+                break
+            }
+            default: {
+                console.error(`Unsupported command: "${args[0]}". Try running \`pgeon help\`.`)
+                process.exit(1)
+                break
+            }
+        }
+    } catch (err) {
+        if (typeof err === 'string') {
+            console.error(`Error:`, err)
+        } else {
+            console.error(`Unexpected error:`, err)
+        }
+        process.exit(1)
+    }
+})()
 
 // Source: https://github.com/pgjdbc/pgjdbc/blob/master/pgjdbc/src/main/java/org/postgresql/core/Oid.java.
 enum PgTypeId {
@@ -80,76 +119,11 @@ const jsToPgType: {[jsType: string]: PgTypeId[]} = {
   'Date': [PgTypeId.DATE, PgTypeId.TIMESTAMP, PgTypeId.TIMESTAMPTZ]
 }
 
-export function filesEndingWith(dir: string, include: string[], exclude: string[], result: string[] = []) {
-    const paths = fs.readdirSync(dir).map(f => path.join(dir, f))
-    for (const p of paths) {
-        if (fs.statSync(p).isDirectory()) {
-            filesEndingWith(p, include, exclude, result)
-        } else if (include.some(end => p.endsWith(end)) && !exclude.some(end => p.endsWith(end))) {
-            result.push(p)
-        }
-    }
-    return result
-}
-
-type FieldMap<T> = {
-    [fieldName: string]: {
-        dataType: T
-        isNullable: boolean
-    }
-}
-
-export function getTypeFields(typeChecker: ts.TypeChecker, typeNode: ts.TypeNode) {
-    const typeFields: FieldMap<string> = {}
-
-    typeChecker
-        .getTypeFromTypeNode(typeNode)
-        .getProperties()
-        .map(prop => {
-            const {valueDeclaration} = prop
-            if (!valueDeclaration || !ts.isPropertySignature(valueDeclaration) || !valueDeclaration.type) {
-                throw new Error(`field "${typeNode.getText()}.${prop.getName()}" does not have a supported value declaration`)
-            }
-            const rawType = typeChecker.typeToString(
-                typeChecker.getTypeFromTypeNode(valueDeclaration.type)
-            )
-            const explicitlyOptional = !!(prop.flags & ts.SymbolFlags.Optional)
-            const implicitlyOptional = rawType.endsWith(' | undefined') || rawType.endsWith(' | null')
-            const dataType = implicitlyOptional ? rawType.substr(0, rawType.lastIndexOf(' | ')) : rawType
-
-            typeFields[prop.getName()] = {
-                dataType,
-                isNullable: explicitlyOptional || implicitlyOptional
-            }
-        })
-
-    return typeFields
-}
-
-export async function scanFiles(fileNames: string[]) {
-    const config = {
-        host: 'localhost',
-        port: 5432,
-        database: 'pgeon_tmp_database',
-        user: 'pgeon_tmp_user',
-        password: 'pgeon_tmp_password'
-    }
-
-    const psqlAnon = (cmd: string) => execSync(`sudo -u postgres psql ${cmd}`)
-    const psqlAuth = (cmd: string) => execSync(`sudo -u postgres psql "host=${config.host} port=${config.port} user=${config.user} dbname=${config.database} password='${config.password}'" ${cmd}`)
-
-    psqlAnon(`-c "drop database if exists ${config.database}"`)
-    psqlAnon(`-c "drop role if exists ${config.user}"`)
-    psqlAnon(`-c "create role ${config.user} superuser login encrypted password '${config.password}'"`)
-    psqlAnon(`-c "create database ${config.database} owner ${config.user} encoding 'UTF8'"`)
-    psqlAuth(`-c "alter schema public owner to ${config.user}"`)
-
+async function scanFiles(fileNames: string[]) {
     const program = ts.createProgram(fileNames, {strictNullChecks: true})
     const typeChecker = program.getTypeChecker()
 
-    // TODO Read config from environamental variables.
-    // TODO For nullability, metadata tables would need to be read... But not only columns are returned! :O
-    const db = new pg.Client(config)
+    const db = new pg.Client
     db.connect()
 
     try {
@@ -164,13 +138,10 @@ export async function scanFiles(fileNames: string[]) {
         }
     } finally {
         db.end()
-
-        psqlAnon(`-c "drop database if exists ${config.database}"`)
-        psqlAnon(`-c "drop role if exists ${config.user}"`)
     }
 }
 
-export async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker, db: pg.Client) {
+async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker, db: pg.Client) {
     if (ts.isTaggedTemplateExpression(node) && (node.tag.getText().endsWith('.$query') || node.tag.getText().includes('.$query<'))) {
         const {template} = node
         let query: string
@@ -182,7 +153,7 @@ export async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChe
                 ...template.templateSpans.map(span => span.literal.text)
             ].join('null')
         } else {
-            throw new Error('found `$query` template tag with unsupported template kind')
+            throw 'found `$query` template tag with unsupported template kind'
         }
 
         const queryLines = query.replace(/^\n+/g, '').replace(/\s+$/g, '').split('\n')
@@ -208,9 +179,9 @@ export async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChe
         try {
             queryRes = await db.query(queryPrefix + query + querySuffix)
         } catch (err) {
-            console.error(errorMessage(sourceFile, node, err))
-            console.error(errorQuery(query, !err.position ? undefined : err.position - queryPrefix.length - 1))
-            return
+            return console.error(
+                queryError(err.message, sourceFile, node, query, !err.position ? undefined : err.position - queryPrefix.length - 1)
+            )
         }
 
         const queryFields: FieldMap<PgTypeId> = {}
@@ -229,28 +200,25 @@ export async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChe
         for (const queryFieldName of Object.keys(queryFields)) {
             const typeField = typeFields[queryFieldName]
             if (!typeField) {
-                console.error(errorMessage(sourceFile, node, new Error(
-                    `returned field "${queryFieldName}" was not declared in interface "${typeArgumentName}"`
-                )))
-                console.error(errorQuery(query))
+                return console.error(
+                    queryError(`returned field "${queryFieldName}" was not declared in interface "${typeArgumentName}"`, sourceFile, node, query)
+                )
             }
         }
 
         for (const [typeFieldName, typeField] of Object.entries(typeFields)) {
             const queryField = queryFields[typeFieldName]
             if (!queryField) {
-                console.error(errorMessage(sourceFile, node, new Error(
-                    `declared field "${typeArgumentName}.${typeFieldName}" was not returned by the query`
-                )))
-                console.error(errorQuery(query))
+                return console.error(
+                    queryError(`declared field "${typeArgumentName}.${typeFieldName}" was not returned by the query`, sourceFile, node, query)
+                )
             }
             else {
                 const validPgTypes = (jsToPgType as any)[typeField.dataType]
                 if (!validPgTypes.includes(queryField.dataType)) {
-                    console.error(errorMessage(sourceFile, node, new Error(
-                        `type mismatch in "${typeArgumentName}.${typeFieldName}" – "${typeField.dataType}" and "${PgTypeId[queryField.dataType]}" are incompatible`
-                    )))
-                    console.error(errorQuery(query))
+                    return console.error(
+                        queryError(`type mismatch in "${typeArgumentName}.${typeFieldName}" – "${typeField.dataType}" and "${PgTypeId[queryField.dataType]}" are incompatible`, sourceFile, node, query)
+                    )
                 }
             }
         }
@@ -261,18 +229,68 @@ export async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChe
     }
 }
 
-function errorQuery(query: string, errPos?: number) {
-    if (!errPos || errPos >= query.length) {
-        return '\n\x1b[31m' + query + '\x1b[0m\n'
-    } else {
-        return '\n\x1b[31m' + query.substr(0, errPos) + '\x1b[0m'
-            + '\x1b[41m' + '\x1b[30m' + query[errPos] + '\x1b[0m' + '\x1b[0m'
-            + '\x1b[31m' + query.substr(errPos + 1) + '\x1b[0m\n'
+type FieldMap<T extends string | number> = {
+    [fieldName: string]: {
+        dataType: T
+        isNullable: boolean
     }
 }
 
-function errorMessage(sourceFile: ts.SourceFile, node: ts.Node, err: Error) {
+function getTypeFields(typeChecker: ts.TypeChecker, typeNode: ts.TypeNode) {
+    const typeFields: FieldMap<string> = {}
+
+    typeChecker
+        .getTypeFromTypeNode(typeNode)
+        .getProperties()
+        .map(prop => {
+            const {valueDeclaration} = prop
+            if (!valueDeclaration || !ts.isPropertySignature(valueDeclaration) || !valueDeclaration.type) {
+                throw `field "${typeNode.getText()}.${prop.getName()}" does not have a supported value declaration`
+            }
+            const rawType = typeChecker.typeToString(
+                typeChecker.getTypeFromTypeNode(valueDeclaration.type)
+            )
+            const explicitlyOptional = !!(prop.flags & ts.SymbolFlags.Optional)
+            const implicitlyOptional = rawType.endsWith(' | undefined') || rawType.endsWith(' | null')
+            const dataType = implicitlyOptional ? rawType.substr(0, rawType.lastIndexOf(' | ')) : rawType
+
+            typeFields[prop.getName()] = {
+                dataType,
+                isNullable: explicitlyOptional || implicitlyOptional
+            }
+        })
+
+    return typeFields
+}
+
+function queryError(
+    errMessage: string,
+    sourceFile: ts.SourceFile,
+    node: ts.Node,
+    query: string,
+    errPosition?: number
+): string {
     const {line} = sourceFile.getLineAndCharacterOfPosition(node.getStart())
     const errLocation = `${sourceFile.fileName}:${line + 1}`
-    return `[\x1b[90m${errLocation}\x1b[0m] ${err.message}`
+    const str = `[\x1b[90m${errLocation}\x1b[0m] ${errMessage}`
+
+    if (errPosition === undefined || errPosition >= query.length) {
+        return str + '\n\x1b[31m' + query + '\x1b[0m\n'
+    } else {
+        return str + '\n\x1b[31m' + query.substr(0, errPosition) + '\x1b[0m'
+            + '\x1b[41m' + '\x1b[30m' + query[errPosition] + '\x1b[0m' + '\x1b[0m'
+            + '\x1b[31m' + query.substr(errPosition + 1) + '\x1b[0m\n'
+    }
+}
+
+function filesEndingWith(dir: string, include: string[], exclude: string[], result: string[] = []) {
+    const paths = fs.readdirSync(dir).map(f => path.join(dir, f))
+    for (const p of paths) {
+        if (fs.statSync(p).isDirectory()) {
+            filesEndingWith(p, include, exclude, result)
+        } else if (include.some(end => p.endsWith(end)) && !exclude.some(end => p.endsWith(end))) {
+            result.push(p)
+        }
+    }
+    return result
 }

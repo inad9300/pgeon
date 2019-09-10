@@ -4,7 +4,7 @@
     "description": "Extension and static analyzer for node-postgres.",
     "scripts": {
         "start": "tsc --watch",
-        "test": "node ./bin/pgeon.cli.js scan tests/"
+        "test": "node ./bin/cli.js scan tests/"
     },
     "peerDependencies": {
         "pg": ">=7.5.0",
