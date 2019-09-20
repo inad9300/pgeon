@@ -1,5 +1,9 @@
 import {Client, Pool, QueryConfig, QueryResult, QueryResultRow} from 'pg'
 
+// This is required because of the weird way in which `pg.Pool` is initialized
+// (see https://github.com/brianc/node-postgres/blob/v7.12.1/lib/index.js#L31).
+import * as PgPool from 'pg-pool'
+
 type $QueryConfig = Omit<QueryConfig, 'text' | 'values'>
 
 declare module 'pg' {
@@ -44,4 +48,4 @@ function $query<R extends QueryResultRow>(this: Client | Pool, queryPartsOrQuery
     }
 }
 
-Client.prototype.$query = Pool.prototype.$query = $query
+Client.prototype.$query = PgPool.prototype.$query = $query
