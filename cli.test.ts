@@ -1,67 +1,49 @@
 #!/usr/bin/env node
 
+import {ok, deepStrictEqual as eq} from 'assert'
 import {execSync} from 'child_process'
 
-/*
-PGUSER=dbuser \
-PGHOST=database.server.com \
-PGPASSWORD=secretpassword \
-PGDATABASE=mydb \
-PGPORT=3211 \
-node script.js
+const scan = (file: string) => execSync(`node ./bin/cli.js scan ${file}`).toString()
 
-# Default values:
-PGHOST='localhost'
-PGUSER=process.env.USER
-PGDATABASE=process.env.USER
-PGPASSWORD=null
-PGPORT=5432
+/*
+create table users (
+    id serial primary key,
+    name varchar(50) not null,
+    gender char(1) not null,
+    is_human bool not null,
+    descents smallint not null,
+    joined_year int,
+    points float not null,
+    birthday date not null,
+    picture bytea not null
+);
 */
 
-const config = {
-    host: 'localhost',
-    port: 5432,
-    database: 'pgeon_tmp_database',
-    user: 'pgeon_tmp_user',
-    password: 'pgeon_tmp_password'
-}
+let output: string
 
-const psqlAnon = (cmd: string) => execSync(`sudo -u postgres psql ${cmd}`)
-const psqlAuth = (cmd: string) => execSync(`sudo -u postgres psql "host=${config.host} port=${config.port} user=${config.user} dbname=${config.database} password='${config.password}'" ${cmd}`)
+output = scan('tests/syntax-error.ts')
+ok(output.includes('tests/syntax-error.ts'))
+ok(output.includes('syntax error at or near "from"'))
+ok(output.includes('elect one'))
 
-try {
-    // Set up fresh database
+output = scan('tests/unknown-table.ts')
+ok(output.includes('tests/unknown-table.ts'))
+ok(output.includes('relation "users" does not exist'))
+ok(output.includes('select *'))
 
-    psqlAnon(`-c "drop database if exists ${config.database}"`)
-    psqlAnon(`-c "drop role if exists ${config.user}"`)
-    psqlAnon(`-c "create role ${config.user} superuser login encrypted password '${config.password}'"`)
-    psqlAnon(`-c "create database ${config.database} owner ${config.user} encoding 'UTF8'"`)
-    psqlAuth(`-c "alter schema public owner to ${config.user}"`)
+output = scan('tests/type-mismatch.ts')
+ok(output.includes('tests/type-mismatch.ts'))
+ok(output.includes('type mismatch in "Row.a_number"'))
+ok(output.includes('select 1'))
 
-    console.log('> Creating main schema.')
-    // psqlAuth(`-f db.sql`)
-    // TODO Inline.
-    /*
-    create table users (
-        id serial primary key,
-        name varchar(50) not null,
-        gender char(1) not null,
-        is_human bool not null,
-        descents smallint not null,
-        joined_year int,
-        points float not null,
-        birthday date not null,
-        picture bytea not null
-    );
-    */
+output = scan('tests/no-placeholders.ts')
+eq(output, '')
 
-    // Run tests
+output = scan('tests/nested-placeholders.ts')
+eq(output, '')
 
-    // TODO
+output = scan('tests/all-types.ts')
+eq(output, '')
 
-} finally {
-    // Tear down database
-
-    psqlAnon(`-c "drop database if exists ${config.database}"`)
-    psqlAnon(`-c "drop role if exists ${config.user}"`)
-}
+output = scan('tests/with-query-options.ts')
+eq(output, '')

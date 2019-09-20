@@ -3,18 +3,21 @@
     "version": "0.0.1",
     "description": "Extension and static analyzer for node-postgres.",
     "scripts": {
-        "start": "tsc --watch",
-        "test": "node ./bin/cli.js scan tests/"
+        "watch": "tsc --watch",
+        "test": "tsc && npm run test:query && npm run test:cli && npm run test:cli-scan",
+        "test:query": "PGDATABASE=postgres node ./bin/\\$query.test.js",
+        "test:cli": "PGDATABASE=postgres node ./bin/cli.test.js",
+        "test:cli-scan": "PGDATABASE=postgres node ./bin/cli.js scan tests/"
     },
     "peerDependencies": {
         "pg": ">=7.5.0",
         "typescript": ">=3.1.6"
     },
     "devDependencies": {
-        "@types/node": "12.7.4",
+        "@types/node": "12.7.5",
         "@types/pg": "7.11.1",
         "pg": "7.12.1",
-        "typescript": "3.6.2"
+        "typescript": "3.6.3"
     },
     "engines": {
         "node": ">=12.0.0"

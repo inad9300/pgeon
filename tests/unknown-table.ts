@@ -6,6 +6,8 @@ interface Row {
     a_string: string
 }
 
-new Client().$query<Row>({name: 'example'})`
-    select 1 a_number, 's' a_string
+new Client().$query<Row>`
+    select *
+    from users
+    where id = 5
 `

@@ -1,13 +1,12 @@
 import {Client} from 'pg'
+import '../$query'
 
-;(async () => {
-    interface Row {
-        a_number: number
-        a_string: string
-    }
+interface Row {
+    a_number: number
+    a_string: string
+}
 
-    await new Client().$query<Row>`
-        elect one
-        from dual
-    `
-})
+new Client().$query<Row>`
+    elect one
+    from dual
+`

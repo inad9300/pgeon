@@ -22,22 +22,26 @@ pgeon scan [<dir>] – Scan *.ts and *.tsx files in the given directory (or, by 
             }
             case 'scan': {
                 const dir = args[1] || process.cwd()
-                await scanFiles(filesEndingWith(dir, ['.ts', '.tsx'], ['.d.ts']))
+                if (fs.statSync(dir).isDirectory()) {
+                    await scanFiles(filesEndingWith(dir, ['.ts', '.tsx'], ['.d.ts']))
+                } else {
+                    await scanFiles([dir])
+                }
 
                 process.exit(0)
                 break
             }
             default: {
-                console.error(`Unsupported command: "${args[0]}". Try running \`pgeon help\`.`)
+                console.log(`Unsupported command: "${args[0]}". Try running \`pgeon help\`.`)
                 process.exit(1)
                 break
             }
         }
     } catch (err) {
         if (typeof err === 'string') {
-            console.error(`Error:`, err)
+            console.log(`Error:`, err)
         } else {
-            console.error(`Unexpected error:`, err)
+            console.log(`Unexpected error:`, err)
         }
         process.exit(1)
     }
@@ -179,7 +183,7 @@ async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChecker: t
         try {
             queryRes = await db.query(queryPrefix + query + querySuffix)
         } catch (err) {
-            return console.error(
+            return console.log(
                 queryError(err.message, sourceFile, node, query, !err.position ? undefined : err.position - queryPrefix.length - 1)
             )
         }
@@ -200,7 +204,7 @@ async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChecker: t
         for (const queryFieldName of Object.keys(queryFields)) {
             const typeField = typeFields[queryFieldName]
             if (!typeField) {
-                return console.error(
+                return console.log(
                     queryError(`returned field "${queryFieldName}" was not declared in interface "${typeArgumentName}"`, sourceFile, node, query)
                 )
             }
@@ -209,14 +213,14 @@ async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChecker: t
         for (const [typeFieldName, typeField] of Object.entries(typeFields)) {
             const queryField = queryFields[typeFieldName]
             if (!queryField) {
-                return console.error(
+                return console.log(
                     queryError(`declared field "${typeArgumentName}.${typeFieldName}" was not returned by the query`, sourceFile, node, query)
                 )
             }
             else {
                 const validPgTypes = (jsToPgType as any)[typeField.dataType]
                 if (!validPgTypes.includes(queryField.dataType)) {
-                    return console.error(
+                    return console.log(
                         queryError(`type mismatch in "${typeArgumentName}.${typeFieldName}" – "${typeField.dataType}" and "${PgTypeId[queryField.dataType]}" are incompatible`, sourceFile, node, query)
                     )
                 }

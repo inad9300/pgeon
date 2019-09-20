@@ -1,11 +1,10 @@
 import {Client} from 'pg'
+import '../$query'
 
-;(async () => {
-    interface Row {
-        a_number: string
-    }
+interface Row {
+    a_number: string
+}
 
-    await new Client().$query<Row>`
-        select 1 a_number
-    `
-})
+new Client().$query<Row>`
+    select 1 a_number
+`
