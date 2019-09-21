@@ -1,0 +1,2 @@
+- Type-check input values.
+- Check out supported types and JavaScript-to-Postgres type mapping in [pg-types](https://github.com/brianc/node-pg-types).

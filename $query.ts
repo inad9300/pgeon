@@ -30,13 +30,6 @@ function getQueryText(queryParts: TemplateStringsArray) {
     return text
 }
 
-/**
- * Template literal tag used to identify SQL queries in the code for static analysis.
- *
- * It being a template literal tag with placeholders assumed to be values guarantees that the
- * string is static, thus allowing to distinguish between static and dynamic queries. Additionally,
- * in-line arguments minimize indexing mistakes between the query placeholders and the arguments.
- */
 function $query<R extends QueryResultRow>(this: Client | Pool, queryParts: TemplateStringsArray, ...values: any[]): Promise<QueryResult<R>>
 function $query<R extends QueryResultRow>(this: Client | Pool, queryConfig: $QueryConfig): ((queryParts: TemplateStringsArray, ...values: any[]) => Promise<QueryResult<R>>)
 function $query<R extends QueryResultRow>(this: Client | Pool, queryPartsOrQueryConfig: TemplateStringsArray | $QueryConfig, ...valuesOrNothing: any[]): Promise<QueryResult<R>> | ((queryParts: TemplateStringsArray, ...values: any[]) => Promise<QueryResult<R>>) {

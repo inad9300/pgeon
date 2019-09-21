@@ -5,20 +5,6 @@ import {execSync} from 'child_process'
 
 const scan = (file: string) => execSync(`node ./bin/cli.js scan ${file}`).toString()
 
-/*
-create table users (
-    id serial primary key,
-    name varchar(50) not null,
-    gender char(1) not null,
-    is_human bool not null,
-    descents smallint not null,
-    joined_year int,
-    points float not null,
-    birthday date not null,
-    picture bytea not null
-);
-*/
-
 let output: string
 
 output = scan('tests/syntax-error.ts')

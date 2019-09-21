@@ -1,0 +1,10 @@
+node_modules/
+tests/
+bin/tests/
+/*.ts
+bin/cli.d.ts
+**/*.test.d.ts
+**/*.test.js
+**/*.js.map
+**/*.json
+**/*.md

@@ -2,8 +2,8 @@
     "compilerOptions": {
         "outDir": "bin",
         "target": "es5",
-        "lib": ["ESNext"],
-        "module": "commonjs",
+        "lib": ["esnext"],
+        "module": "umd",
         "moduleResolution": "node",
         "sourceMap": true,
         "declaration": true,

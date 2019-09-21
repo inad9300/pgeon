@@ -52,9 +52,9 @@ import './$query'
             await client.end()
             await pool.end()
         } finally {
-            process.exit(-1)
+            process.exit(1)
         }
     }
 
-    process.exit(-1)
+    process.exit(1)
 })()

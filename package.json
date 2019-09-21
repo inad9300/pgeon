@@ -1,9 +1,35 @@
 {
     "name": "pgeon",
     "version": "0.0.1",
-    "description": "Extension and static analyzer for node-postgres.",
+    "description": "Extension for node-postgres and static analyzer for SQL queries.",
+    "license": "AGPL-3.0",
+    "homepage": "https://github.com/inad9300/pgeon",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/inad9300/pgeon"
+    },
+    "bugs": {
+        "url": "https://github.com/inad9300/pgeon/issues"
+    },
+    "author": {
+        "name": "Daniel Martín",
+        "email": "inad9300@gmail.com"
+    },
+    "keywords": [
+        "node-postgres",
+        "postgres",
+        "PostgreSQL",
+        "SQL",
+        "static analysis",
+        "type safety"
+    ],
+    "bin": "bin/cli.js",
+    "main": "bin/$query.js",
+    "types": "bin/$query.d.ts",
+    "typings": "bin/$query.d.ts",
     "scripts": {
         "watch": "tsc --watch",
+        "prepare": "tsc && chmod +x bin/cli.js",
         "test": "tsc && npm run test:query && npm run test:cli && npm run test:cli-scan",
         "test:query": "PGDATABASE=postgres node ./bin/\\$query.test.js",
         "test:cli": "PGDATABASE=postgres node ./bin/cli.test.js",
