@@ -71,7 +71,7 @@ For example, the following code:
 
 ```ts
 import {Client} from 'pg'
-import '../$query'
+import 'pgeon'
 
 new Client().$query<{}>`
     elect one
