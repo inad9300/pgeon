@@ -22,7 +22,7 @@
         "SQL",
         "static analysis",
         "type safety",
-        "typescript"
+        "TypeScript"
     ],
     "bin": "bin/cli.js",
     "main": "bin/$query.js",
