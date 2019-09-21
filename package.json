@@ -21,7 +21,8 @@
         "PostgreSQL",
         "SQL",
         "static analysis",
-        "type safety"
+        "type safety",
+        "typescript"
     ],
     "bin": "bin/cli.js",
     "main": "bin/$query.js",
