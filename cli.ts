@@ -111,16 +111,28 @@ enum PgTypeId {
     XML_ARRAY = 143
 }
 
+const pgBooleanTypes = [PgTypeId.BOOL]
+const pgTextualTypes = [PgTypeId.CHAR, PgTypeId.TEXT, PgTypeId.BPCHAR, PgTypeId.VARCHAR]
+const pgNumericTypes = [
+    PgTypeId.OID,
+    PgTypeId.NUMERIC,
+    PgTypeId.INT2,
+    PgTypeId.INT4,
+    PgTypeId.INT8,
+    PgTypeId.FLOAT4,
+    PgTypeId.FLOAT8
+]
+
 const jsToPgType: {[jsType: string]: PgTypeId[]} = {
-  'boolean': [PgTypeId.BOOL],
-  'Boolean': [PgTypeId.BOOL],
-  'Uint8Array': [PgTypeId.BYTEA],
-  'string': [PgTypeId.CHAR, PgTypeId.TEXT, PgTypeId.BPCHAR, PgTypeId.VARCHAR],
-  'String': [PgTypeId.CHAR, PgTypeId.TEXT, PgTypeId.BPCHAR, PgTypeId.VARCHAR],
-  'number': [PgTypeId.INT8, PgTypeId.INT2, PgTypeId.INT4, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
-  'Number': [PgTypeId.INT8, PgTypeId.INT2, PgTypeId.INT4, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
-  'BigInt': [PgTypeId.INT8, PgTypeId.INT2, PgTypeId.INT4, PgTypeId.FLOAT4, PgTypeId.FLOAT8, PgTypeId.NUMERIC],
-  'Date': [PgTypeId.DATE, PgTypeId.TIMESTAMP, PgTypeId.TIMESTAMPTZ]
+  'boolean': pgBooleanTypes,
+  'Boolean': pgBooleanTypes,
+  'string': pgTextualTypes,
+  'String': pgTextualTypes,
+  'number': pgNumericTypes,
+  'Number': pgNumericTypes,
+  'BigInt': pgNumericTypes,
+  'Date': [PgTypeId.DATE, PgTypeId.TIMESTAMP, PgTypeId.TIMESTAMPTZ],
+  'Uint8Array': [PgTypeId.BYTEA]
 }
 
 async function scanFiles(fileNames: string[]) {
