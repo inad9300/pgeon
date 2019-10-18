@@ -50,7 +50,7 @@ const result = await pool.$query<User>({name: 'fetch-user'})`
 
 All placeholders will be interpreted as query parameters, so that the resulting queries are not vulnerable to SQL injection. Having the parameters in-line helps minimizing indexing mistakes between the query placeholders and their corresponding values.
 
-The `$query` template literal tag can be later used to identify SQL queries in the code for static analysis. For this reason, it is important that `$query` is not aliased, and that the same identifier is not used anywhere else in the codebase.
+The `$query` template literal tag can be later used to identify SQL queries in the code for static analysis. For this reason, it is important that `$query` is not aliased, and that no other template literal named the same exists elsewhere in the codebase.
 
 The usage of a template literal where the placeholders are assumed to be query parameters guarantees that the string is static, distinguishing them from dynamic queries, which are much harder to be statically analyzed.
 
