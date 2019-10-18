@@ -1,6 +1,6 @@
 # pgeon
 
-Extension for node-postgres and static analyzer for SQL queries.
+Extension for [node-postgres](https://github.com/brianc/node-postgres) and static analyzer for SQL queries.
 
 ## Installation
 
