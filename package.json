@@ -31,7 +31,7 @@
     "scripts": {
         "watch": "tsc --watch",
         "prepare": "tsc && chmod +x bin/cli.js",
-        "test": "tsc && npm run test:query && npm run test:cli && npm run test:cli-scan",
+        "test": "tsc && npm run test:query && npm run test:cli && npm run test:cli-scan -- > /dev/null",
         "test:query": "PGDATABASE=postgres node ./bin/\\$query.test.js",
         "test:cli": "PGDATABASE=postgres node ./bin/cli.test.js",
         "test:cli-scan": "PGDATABASE=postgres node ./bin/cli.js scan tests/"
@@ -40,11 +40,14 @@
         "pg": ">=7.5.0",
         "typescript": ">=3.1.6"
     },
+    "dependencies": {
+        "pg-query-native": "1.2.0"
+    },
     "devDependencies": {
-        "@types/node": "12.7.5",
-        "@types/pg": "7.11.1",
+        "@types/node": "12.11.1",
+        "@types/pg": "7.11.2",
         "pg": "7.12.1",
-        "typescript": "3.6.3"
+        "typescript": "3.6.4"
     },
     "engines": {
         "node": ">=12.0.0"

@@ -44,14 +44,18 @@ import './$query'
         result = await pool.$query({})`select ${1}::integer a_number, ${'s'} a_string`
         eq(result.rows, [{a_number: 1, a_string: 's'}])
 
-        process.exit(0)
-    } catch (err) {
-        console.error(err.message)
-    } finally {
         try {
             await client.end()
             await pool.end()
         } finally {
+            process.exit(0)
+        }
+    } catch (err) {
+        try {
+            await client.end()
+            await pool.end()
+        } finally {
+            console.error(err.message)
             process.exit(1)
         }
     }

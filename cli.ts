@@ -4,6 +4,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as pg from 'pg'
 import * as ts from 'typescript'
+import {parse} from 'pg-query-native'
 
 ;(async () => {
     try {
@@ -188,53 +189,78 @@ async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChecker: t
             })
             .join('\n')
 
-        const queryPrefix = 'select * from ('
-        const querySuffix = ') x limit 0'
-
-        let queryRes: pg.QueryResult
-        try {
-            queryRes = await db.query(queryPrefix + query + querySuffix)
-        } catch (err) {
+        const {query: ast, error: err} = parse(query)
+        if (err) {
             return console.log(
-                queryError(err.message, sourceFile, node, query, !err.position ? undefined : err.position - queryPrefix.length - 1)
+                queryError(err.message, sourceFile, node, query, err.cursorPosition)
             )
         }
 
-        const queryFields: FieldMap<PgTypeId> = {}
-        for (const queryField of queryRes.fields) {
-            queryFields[queryField.name] = {
-                dataType: queryField.dataTypeID,
-                isNullable: true
-            }
-        }
+        const isSelect = !!ast[0].SelectStmt
+        const isInsert = !!ast[0].InsertStmt
+        const isUpdate = !!ast[0].UpdateStmt
+        const isDelete = !!ast[0].DeleteStmt
 
-        const typeArguments = node.typeArguments || (node.tag as unknown as ts.NodeWithTypeArguments).typeArguments
-        const typeArgument = typeArguments![0]
-        const typeArgumentName = typeArgument.getText()
-        const typeFields = getTypeFields(typeChecker, typeArgument)
+        if (isInsert || isUpdate || isDelete) {
+            const queryPrefix = 'explain '
 
-        for (const queryFieldName of Object.keys(queryFields)) {
-            const typeField = typeFields[queryFieldName]
-            if (!typeField) {
+            try {
+                await db.query(queryPrefix + query)
+            } catch (err) {
                 return console.log(
-                    queryError(`returned field "${queryFieldName}" was not declared in interface "${typeArgumentName}"`, sourceFile, node, query)
+                    queryError(err.message, sourceFile, node, query, !err.position ? undefined : parseInt(err.position, 10) - queryPrefix.length - 1)
                 )
             }
         }
+        else if (isSelect) {
+            const queryPrefix = 'select * from ('
+            const querySuffix = ') x where 1 = 0 limit 0'
 
-        for (const [typeFieldName, typeField] of Object.entries(typeFields)) {
-            const queryField = queryFields[typeFieldName]
-            if (!queryField) {
+            let queryRes: pg.QueryResult
+            try {
+                queryRes = await db.query(queryPrefix + query + querySuffix)
+            } catch (err) {
                 return console.log(
-                    queryError(`declared field "${typeArgumentName}.${typeFieldName}" was not returned by the query`, sourceFile, node, query)
+                    queryError(err.message, sourceFile, node, query, !err.position ? undefined : err.position - queryPrefix.length - 1)
                 )
             }
-            else {
-                const validPgTypes = (jsToPgType as any)[typeField.dataType]
-                if (!validPgTypes.includes(queryField.dataType)) {
+
+            const queryFields: FieldMap<PgTypeId> = {}
+            for (const queryField of queryRes.fields) {
+                queryFields[queryField.name] = {
+                    dataType: queryField.dataTypeID,
+                    isNullable: true
+                }
+            }
+
+            const typeArguments = node.typeArguments || (node.tag as unknown as ts.NodeWithTypeArguments).typeArguments
+            const typeArgument = typeArguments![0]
+            const typeArgumentName = typeArgument.getText()
+            const typeFields = getTypeFields(typeChecker, typeArgument)
+
+            for (const queryFieldName of Object.keys(queryFields)) {
+                const typeField = typeFields[queryFieldName]
+                if (!typeField) {
                     return console.log(
-                        queryError(`type mismatch in "${typeArgumentName}.${typeFieldName}" – "${typeField.dataType}" and "${PgTypeId[queryField.dataType]}" are incompatible`, sourceFile, node, query)
+                        queryError(`returned field "${queryFieldName}" was not declared in interface "${typeArgumentName}"`, sourceFile, node, query)
                     )
+                }
+            }
+
+            for (const [typeFieldName, typeField] of Object.entries(typeFields)) {
+                const queryField = queryFields[typeFieldName]
+                if (!queryField) {
+                    return console.log(
+                        queryError(`declared field "${typeArgumentName}.${typeFieldName}" was not returned by the query`, sourceFile, node, query)
+                    )
+                }
+                else {
+                    const validPgTypes = (jsToPgType as any)[typeField.dataType]
+                    if (!validPgTypes.includes(queryField.dataType)) {
+                        return console.log(
+                            queryError(`type mismatch in "${typeArgumentName}.${typeFieldName}" – "${typeField.dataType}" and "${PgTypeId[queryField.dataType]}" are incompatible`, sourceFile, node, query)
+                        )
+                    }
                 }
             }
         }
