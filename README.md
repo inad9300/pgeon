@@ -10,6 +10,8 @@ npm i -S pgeon
 
 ## Usage
 
+### Runtime library
+
 Importing `pgeon` after `pg` will extend `Pool` and `Client` with a new `$query` method, which is a proxy to the `query()` method already present in both `Pool` and `Client`.
 
 ```ts
@@ -53,6 +55,8 @@ All placeholders will be interpreted as query parameters, so that the resulting 
 The `$query` template literal tag can be later used to identify SQL queries in the code for static analysis. For this reason, it is important that `$query` is not aliased, and that no other template literal named the same exists elsewhere in the codebase.
 
 The usage of a template literal where the placeholders are assumed to be query parameters guarantees that the string is static, distinguishing them from dynamic queries, which are much harder to be statically analyzed.
+
+### Static analyzer
 
 With everything in place, the static analysis can now be run like so:
 
