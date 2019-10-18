@@ -79,10 +79,32 @@ new Client().$query<{}>`
 `
 ```
 
-Will output something similar to:
+Will output something like:
 
 ```sh
-[tests/syntax-error.ts:4] syntax error at or near "elect"
+[syntax-error.ts:4] syntax error at or near "elect"
     elect one
     from dual
+```
+
+Similarly, you can have a select statement such as:
+
+```ts
+import {Client} from 'pg'
+import 'pgeon'
+
+interface Row {
+    col: number
+}
+
+new Client().$query<Row>`
+    select 'x' col
+`
+```
+
+And be warned of the mistake:
+
+```sh
+[type-mismatch.ts:8] type mismatch in "Row.col" – "number" and "TEXT" are incompatible
+    select 'x' col
 ```
