@@ -258,7 +258,7 @@ async function scanNode(node: ts.Node, sourceFile: ts.SourceFile, typeChecker: t
                     const validPgTypes = (jsToPgType as any)[typeField.dataType]
                     if (!validPgTypes.includes(queryField.dataType)) {
                         return console.log(
-                            queryError(`type mismatch in "${typeArgumentName}.${typeFieldName}" – "${typeField.dataType}" and "${PgTypeId[queryField.dataType]}" are incompatible`, sourceFile, node, query)
+                            queryError(`type mismatch in "${typeArgumentName}.${typeFieldName}": "${typeField.dataType}" and "${PgTypeId[queryField.dataType]}" are incompatible`, sourceFile, node, query)
                         )
                     }
                 }
