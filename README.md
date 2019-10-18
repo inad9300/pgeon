@@ -82,7 +82,7 @@ new Client().$query<{}>`
 Will output something similar to:
 
 ```sh
-[tests/syntax-error.ts:4] syntax error at or near "from"
+[tests/syntax-error.ts:4] syntax error at or near "elect"
     elect one
     from dual
 ```
