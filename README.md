@@ -109,6 +109,6 @@ new Client().$query<Row>`
 And be warned of the mistake:
 
 ```sh
-[type-mismatch.ts:8] type mismatch in "Row.col" – "number" and "TEXT" are incompatible
+[type-mismatch.ts:8] type mismatch in "Row.col": "number" and "TEXT" are incompatible
     select 'x' col
 ```
