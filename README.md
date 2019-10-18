@@ -91,7 +91,7 @@ Will output something like:
     from dual
 ```
 
-Similarly, you can have a select statement such as:
+Similarly, you may have a select statement such as:
 
 ```ts
 import {Client} from 'pg'
