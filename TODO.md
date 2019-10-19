@@ -1,13 +1,10 @@
-- Check types and nullability of `returning` clauses of `insert`/`update`/`delete` statements.
+- Check types and nullability of `returning` clauses of `insert`/`update`/`delete` statements (see https://www.postgresql.org/docs/current/infoschema-columns.html and https://www.postgresql.org/docs/current/infoschema-attributes.html).
 - Check types of placeholders which are part of `where` clauses of `select`/`update`/`delete` statements.
 - Check types of placeholders which are part of `values`/`set` clauses of `insert`/`update` statements.
 - Check nullability of selected columns in `select` statements.
-- Support TypeScript types such as `true`, `1`, `1 | 2`... (compile a minimal TypeScript program to check for type subsets, e.g. `export const x: true = 'abc' extends string ? true : false`).
+- Support TypeScript types such as `true`, `1`, `1 | 2`... (compile a minimal TypeScript program to check for type subsets, e.g. `type x = 'abc' extends string ? true : false; let x: x = true`).
 - Support statements beyond the basic CRUD or warn when used.
 ---
-- Check out supported types and JavaScript-to-Postgres type mapping in [pg-types](https://github.com/brianc/node-pg-types).
-- Separate query parsing and validation logic for potential reuse by other clients (even in other languages).
-- Complete type definitions for `pg-query-native` (see https://github.com/lfittl/libpg_query/issues/51).
----
-- https://www.postgresql.org/docs/current/infoschema-columns.html
-- https://www.postgresql.org/docs/current/infoschema-attributes.html
+- Analyze supported types and JavaScript-to-Postgres type mappings in [pg-types](https://github.com/brianc/node-pg-types).
+- Separate query parsing and validation logic for potential reuse by other clients (or even other languages).
+- Complete `pg-query-native.d.ts` (see https://github.com/lfittl/libpg_query/issues/51).
