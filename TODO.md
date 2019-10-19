@@ -2,7 +2,7 @@
 - Check types of placeholders which are part of `where` clauses of `select`/`update`/`delete` statements.
 - Check types of placeholders which are part of `values`/`set` clauses of `insert`/`update` statements.
 - Check nullability of selected columns in `select` statements.
-- Support TypeScript types such as `true`, `1`, `1 | 2`...
+- Support TypeScript types such as `true`, `1`, `1 | 2`... (compile a minimal TypeScript program to check for type subsets, e.g. `export const x: true = 'abc' extends string ? true : false`).
 - Support statements beyond the basic CRUD or warn when used.
 ---
 - Check out supported types and JavaScript-to-Postgres type mapping in [pg-types](https://github.com/brianc/node-pg-types).
