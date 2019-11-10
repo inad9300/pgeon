@@ -32,17 +32,14 @@ pgeon scan [<dir>] – Scan *.ts and *.tsx files in the given directory (or, by 
                 process.exit(0)
                 break
             }
-            default: {
-                console.log(`Unsupported command: "${args[0]}". Try running \`pgeon help\`.`)
-                process.exit(1)
-                break
-            }
+            default:
+                throw `command "${args[0]}" is not supported. Try running \`pgeon help\`.`
         }
     } catch (err) {
         if (typeof err === 'string') {
-            console.log(`Error:`, err)
+            console.log(`Error:`, err, '\n')
         } else {
-            console.log(`Unexpected error:`, err)
+            console.log(`Unexpected error:`, err, '\n')
         }
         process.exit(1)
     }
@@ -138,6 +135,18 @@ const jsToPgType: {[jsType: string]: PgTypeId[]} = {
 
 async function scanFiles(fileNames: string[]) {
     const program = ts.createProgram(fileNames, {strictNullChecks: true})
+
+    const diagnostics = ts.getPreEmitDiagnostics(program)
+    if (diagnostics.length > 0) {
+        const diagnostic = diagnostics[0]
+        let msg = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+        if (diagnostic.file) {
+            const {line} = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start!)
+            msg = `[\x1b[90m${diagnostic.file.fileName}:${line + 1}\x1b[0m] ${msg}`
+        }
+        throw `failed to compile program with strict null checks. ${msg}`
+    }
+
     const typeChecker = program.getTypeChecker()
 
     const db = new pg.Client

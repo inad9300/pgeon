@@ -31,10 +31,11 @@
     "scripts": {
         "watch": "tsc --watch",
         "prepare": "tsc && chmod +x bin/cli.js",
-        "test": "tsc && npm run test:query && npm run test:cli && npm run test:cli-scan -- > /dev/null",
+        "pretest": "npm run prepare",
+        "test": "npm run test:query && npm run test:cli && npm run test:cli-scan -- > /dev/null",
         "test:query": "PGDATABASE=postgres node ./bin/\\$query.test.js",
         "test:cli": "PGDATABASE=postgres node ./bin/cli.test.js",
-        "test:cli-scan": "PGDATABASE=postgres node ./bin/cli.js scan tests/"
+        "test:cli-scan": "PGDATABASE=postgres node ./bin/cli.js scan fixtures/"
     },
     "peerDependencies": {
         "pg": ">=7.5.0",
