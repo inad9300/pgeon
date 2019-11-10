@@ -51,3 +51,6 @@ eq(output, '')
 
 output = scan('update.ts')
 eq(output, '')
+
+output = scan('intersection-type.ts')
+eq(output, '')
