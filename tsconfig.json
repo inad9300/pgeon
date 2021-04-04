@@ -1,24 +1,13 @@
 {
-    "compilerOptions": {
-        "outDir": "bin",
-        "target": "es5",
-        "lib": ["esnext"],
-        "module": "umd",
-        "moduleResolution": "node",
-        "sourceMap": true,
-        "declaration": true,
-        "strict": true,
-        "noImplicitReturns": true,
-        "noUnusedLocals": true,
-        "noUnusedParameters": true,
-        "noFallthroughCasesInSwitch": true,
-        "forceConsistentCasingInFileNames": true,
-        "experimentalDecorators": true,
-        "emitDecoratorMetadata": true
-    },
-    "exclude": [
-        "bin/",
-        "node_modules/",
-        "fixtures/"
-    ]
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true
+  }
 }

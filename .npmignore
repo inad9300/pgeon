@@ -1,9 +1,8 @@
+dist/
 node_modules/
-fixtures/
-/*.ts
-bin/cli.d.ts
-**/*.test.d.ts
-**/*.test.js
-**/*.js.map
-**/*.json
-**/*.md
+
+/.*
+/Dockerfile.*
+/example.ts
+/postgres-client-tests.ts
+/webpack.config.ts

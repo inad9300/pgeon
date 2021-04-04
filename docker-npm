@@ -1,0 +1,24 @@
+#!/bin/bash
+
+PGPASSWORD=jB8tBAotpE2Z89yjYsJe6u6jNCfHnzxY
+
+docker build --tag pgeon_postgres_image --file Dockerfile.postgres .
+docker container stop pgeon_postgres_container
+docker run --rm --detach \
+  --name pgeon_postgres_container \
+  --env POSTGRES_PASSWORD=$PGPASSWORD \
+  pgeon_postgres_image
+
+PGHOST=$(docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pgeon_postgres_container)
+
+docker build --tag pgeon_node_image --file Dockerfile.node .
+docker container stop pgeon_node_container
+docker run --rm --detach \
+  --name pgeon_node_container \
+  --env PGPASSWORD=$PGPASSWORD \
+  --env PGHOST=$PGHOST \
+  pgeon_node_image \
+  npm "$@"
+
+clear
+docker logs --follow pgeon_node_container

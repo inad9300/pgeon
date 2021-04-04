@@ -1,56 +1,43 @@
 {
-    "name": "pgeon",
-    "version": "0.0.1",
-    "description": "Extension for node-postgres and static analyzer for SQL queries.",
-    "license": "AGPL-3.0",
-    "homepage": "https://github.com/inad9300/pgeon",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/inad9300/pgeon"
-    },
-    "bugs": {
-        "url": "https://github.com/inad9300/pgeon/issues"
-    },
-    "author": {
-        "name": "Daniel Martín",
-        "email": "inad9300@gmail.com"
-    },
-    "keywords": [
-        "node-postgres",
-        "postgres",
-        "PostgreSQL",
-        "SQL",
-        "static analysis",
-        "type safety",
-        "TypeScript"
-    ],
-    "bin": "bin/cli.js",
-    "main": "bin/$query.js",
-    "types": "bin/$query.d.ts",
-    "typings": "bin/$query.d.ts",
-    "scripts": {
-        "watch": "tsc --watch",
-        "prepare": "tsc && chmod +x bin/cli.js",
-        "pretest": "npm run prepare",
-        "test": "npm run test:query && npm run test:cli && npm run test:cli-scan -- > /dev/null",
-        "test:query": "PGDATABASE=postgres node ./bin/\\$query.test.js",
-        "test:cli": "PGDATABASE=postgres node ./bin/cli.test.js",
-        "test:cli-scan": "PGDATABASE=postgres node ./bin/cli.js scan fixtures/"
-    },
-    "peerDependencies": {
-        "pg": ">=7.5.0",
-        "typescript": ">=3.1.6"
-    },
-    "dependencies": {
-        "pg-query-native": "1.2.0"
-    },
-    "devDependencies": {
-        "@types/node": "12.12.7",
-        "@types/pg": "7.11.2",
-        "pg": "7.12.1",
-        "typescript": "3.7.2"
-    },
-    "engines": {
-        "node": ">=12.0.0"
-    }
+  "name": "pgeon",
+  "version": "0.0.2",
+  "description": "Type-safe Postgres client.",
+  "license": "AGPL-3.0",
+  "homepage": "https://github.com/inad9300/pgeon",
+  "repository": {
+      "type": "git",
+      "url": "https://github.com/inad9300/pgeon"
+  },
+  "bugs": {
+      "url": "https://github.com/inad9300/pgeon/issues"
+  },
+  "author": {
+      "name": "Daniel Martín",
+      "email": "inad9300@gmail.com"
+  },
+  "keywords": [
+    "Postgres",
+    "PostgreSQL",
+    "SQL",
+    "Postgres client",
+    "Postgres driver",
+    "type safety",
+    "static analysis",
+    "TypeScript"
+  ],
+  "scripts": {
+    "test": "tsc && node postgres-client-tests.js",
+    "start": "webpack --mode production && node dist/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "14.14.36",
+    "ts-loader": "8.0.18",
+    "ts-node": "9.1.1",
+    "typescript": "4.2.3",
+    "webpack": "5.28.0",
+    "webpack-cli": "4.5.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
 }
