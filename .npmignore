@@ -3,6 +3,7 @@ node_modules/
 
 /.*
 /Dockerfile.*
+/docker-npm
 /example.ts
 /postgres-client-tests.ts
 /webpack.config.ts
