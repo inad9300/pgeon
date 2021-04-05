@@ -1,4 +1,4 @@
-import { Client, newPool, CancelError, ObjectId } from './postgres-client'
+import { newPool, Client, ObjectId, QueryCancelledError } from './postgres-client'
 import { ok, deepStrictEqual as eq } from 'assert'
 
 const pool = newPool()
@@ -85,7 +85,7 @@ tests[t++] = (async () => {
     await resultPromise
     throw 'Failed to cancel query.'
   } catch (err) {
-    ok(err instanceof CancelError)
+    ok(err instanceof QueryCancelledError)
   }
 })()
 
@@ -99,7 +99,7 @@ tests[t++] = (async () => {
     })
     throw 'Failed to cancel query.'
   } catch (err) {
-    ok(err instanceof CancelError)
+    ok(err instanceof QueryCancelledError)
   }
 })()
 

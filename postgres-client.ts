@@ -9,7 +9,7 @@ import { connect as createTlsConnection, ConnectionOptions } from 'tls'
 // - https://github.com/postgres/postgres/tree/master/src/backend/libpq
 // - https://github.com/postgres/postgres/tree/master/src/backend/utils/adt
 
-interface PoolOptions {
+export interface PoolOptions {
   host: string
   port: number
   database: string
@@ -23,47 +23,35 @@ interface PoolOptions {
   idleTimeout: number
 }
 
-export interface QueryMetadata {
-  paramTypes: ObjectId[]
-  columnMetadata: ColumnMetadata[]
-}
-
-interface PreparedQuery extends QueryMetadata {
-  queryId: string
-}
-
-export type Row = {
-  [columnName: string]: ColumnValue
-}
-
-type ColumnValue = any // undefined | null | boolean | number | string | bigint | Date | Buffer
-
-interface ColumnMetadata {
-  name: string
-  type: ObjectId
-  tableId?: number
-  positionInTable?: number
-}
-
 export interface QueryResult<R extends Row> {
   rows: R[]
   rowsAffected: number
   columnMetadata: ColumnMetadata[]
 }
 
-interface Connection extends Socket {
-  processId: number
-  cancelKey: number
-  preparedQueries: {
-    [queryId: string]: PreparedQuery
-  }
+export type Row = {
+  [columnName: string]: ColumnValue
 }
 
-interface CancellablePromise<T> extends Promise<T> {
+export type ColumnValue = any // undefined | null | boolean | number | number[] | bigint | bigint[] | string | string[] | Date | Buffer
+
+export interface ColumnMetadata {
+  name: string
+  type: ObjectId
+  tableId?: number
+  positionInTable?: number
+}
+
+export interface QueryMetadata {
+  paramTypes: ObjectId[]
+  columnMetadata: ColumnMetadata[]
+}
+
+export interface CancellablePromise<T> extends Promise<T> {
   cancel(): void
 }
 
-export class CancelError extends Error {
+export class QueryCancelledError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'CancelError'
@@ -79,6 +67,18 @@ export interface Pool extends Client {
   getQueryMetadata(query: string): Promise<QueryMetadata>
   transaction(callback: (client: Client) => Promise<void>): Promise<void>
   close(): void
+}
+
+interface PreparedQuery extends QueryMetadata {
+  queryId: string
+}
+
+interface Connection extends Socket {
+  processId: number
+  cancelKey: number
+  preparedQueries: {
+    [queryId: string]: PreparedQuery
+  }
 }
 
 export function newPool(options: Partial<PoolOptions> = {}): Pool {
@@ -146,13 +146,13 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
     const resultPromise = connPromise
       .then(conn => {
         if (cancelled) {
-          throw new CancelError('Query cancelled before query preparation phase.')
+          throw new QueryCancelledError('Query cancelled before query preparation phase.')
         }
         return callback(conn)
       })
       .catch(err => {
-        if (cancelled && !(err instanceof CancelError)) {
-          throw new CancelError('Query cancelled during connection acquisition phase.')
+        if (cancelled && !(err instanceof QueryCancelledError)) {
+          throw new QueryCancelledError('Query cancelled during connection acquisition phase.')
         }
         throw err
       })
@@ -179,25 +179,25 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
     const resultPromise = prepareQuery(conn, query)
       .then(preparedQuery => {
         if (cancelled) {
-          throw new CancelError('Query cancelled before query execution phase.')
+          throw new QueryCancelledError('Query cancelled before query execution phase.')
         }
         return runPreparedQuery<R, V>(conn, preparedQuery, values)
           .then(res => {
             if (cancelled) {
-              throw new CancelError('Query cancelled after query execution phase.')
+              throw new QueryCancelledError('Query cancelled after query execution phase.')
             }
             return res
           })
           .catch(err => {
-            if (cancelled && !(err instanceof CancelError)) {
-              throw new CancelError('Query cancelled during query execution phase.')
+            if (cancelled && !(err instanceof QueryCancelledError)) {
+              throw new QueryCancelledError('Query cancelled during query execution phase.')
             }
             throw err
           })
       })
       .catch(err => {
-        if (cancelled && !(err instanceof CancelError)) {
-          throw new CancelError('Query cancelled during query preparation phase.')
+        if (cancelled && !(err instanceof QueryCancelledError)) {
+          throw new QueryCancelledError('Query cancelled during query preparation phase.')
         }
         throw err
       })
@@ -360,7 +360,7 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
 
       if (msgType === BackendMessage.Authentication) {
         const authRes = readInt32(data, 5) as AuthenticationResponse
-        if (authRes === AuthenticationResponse.Md5) {
+        if (authRes === AuthenticationResponse.Md5Password) {
           const salt = data.slice(9)
           conn.write(createMd5PasswordMessage(options.username, options.password, salt))
         } else if (authRes === AuthenticationResponse.Ok) {
@@ -544,14 +544,13 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
         const colCount = readInt16(data, 5)
         let offset = 7
         for (let i = 0; i < colCount; ++i) {
-          const name            = readCString(data, offset)
-          const tableId         = readInt32(data, offset += name.length + 1) || undefined
-          const positionInTable = readInt16(data, offset += 4) || undefined
-          const type            = readInt32(data, offset += 2)
-          // const typeSize        = readInt16(data, offset += 4)
-          // const typeModifier    = readInt32(data, offset += 2)
-          // const format          = readInt16(data, offset += 4) as WireFormat
-          offset += 4 + 2 + 4 + 2
+          const name            = readCString(data, offset)             ; offset += name.length + 1
+          const tableId         = readInt32(data, offset) || undefined  ; offset += 4
+          const positionInTable = readInt16(data, offset) || undefined  ; offset += 2
+          const type            = readInt32(data, offset)               ; offset += 4
+          /* const typeSize        = readInt16(data, offset)               ; */ offset += 2
+          /* const typeModifier    = readInt32(data, offset)               ; */ offset += 4
+          /* const format          = readInt16(data, offset) as WireFormat ; */ offset += 2
           columnMetadata.push({ name, type, tableId, positionInTable })
         }
         columnMetadataFetched = true
@@ -585,7 +584,7 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
 
     conn.write(createParseMessage(query, queryId, paramTypes!))
     conn.write(createDescribeMessage(queryId))
-    conn.write(createSyncMessage())
+    conn.write(syncMessage)
   })
 }
 
@@ -609,7 +608,7 @@ function cancelCurrentQuery(conn: Connection, options: PoolOptions): Promise<voi
   })
 }
 
-const commandsWithRowsAffected: CommandTag[] = ['INSERT', 'DELETE', 'UPDATE', 'SELECT', 'MOVE', 'FETCH', 'COPY']
+const commandsWithRowsAffected = ['INSERT', 'DELETE', 'UPDATE', 'SELECT', 'MOVE', 'FETCH', 'COPY']
 
 function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connection, query: PreparedQuery, paramValues: V): Promise<QueryResult<R>> {
   return new Promise((resolve, reject) => {
@@ -658,75 +657,39 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
             row[column.name] = null
             continue
           }
-
           const value = data.slice(offset, offset += valueSize)
           switch (column.type) {
-          case ObjectId.Bool:
-            row[column.name] = value[0] !== 0
-            break
-          case ObjectId.Int2:
-            row[column.name] = readInt16(value, 0)
-            break
-          case ObjectId.Int4:
-            row[column.name] = readInt32(value, 0)
-            break
-          case ObjectId.Int8:
-            row[column.name] = readInt64(value, 0)
-            break
-          case ObjectId.Float4:
-            row[column.name] = readFloat32(value, 0)
-            break
-          case ObjectId.Float8:
-            row[column.name] = readFloat64(value, 0)
-            break
-          case ObjectId.Numeric:
-            row[column.name] = readNumeric(value, 0)
-            break
+          case ObjectId.Bool:        row[column.name] = value[0] !== 0                   ; break
+          case ObjectId.Int2:        row[column.name] = readInt16(value, 0)              ; break
+          case ObjectId.Int4:        row[column.name] = readInt32(value, 0)              ; break
+          case ObjectId.Int8:        row[column.name] = readInt64(value, 0)              ; break
+          case ObjectId.Float4:      row[column.name] = readFloat32(value, 0)            ; break
+          case ObjectId.Float8:      row[column.name] = readFloat64(value, 0)            ; break
+          case ObjectId.Numeric:     row[column.name] = readNumeric(value, 0)            ; break
           case ObjectId.Timestamp:
-          case ObjectId.Timestamptz:
-            row[column.name] = readTimestamp(value, 0)
-            break
-          case ObjectId.Oid:
-            row[column.name] = readUint32(value, 0)
-            break
+          case ObjectId.Timestamptz: row[column.name] = readTimestamp(value, 0)          ; break
+          case ObjectId.Oid:         row[column.name] = readUint32(value, 0)             ; break
           case ObjectId.Char:
           case ObjectId.Varchar:
           case ObjectId.Text:
           case ObjectId.Bpchar:
-          case ObjectId.Name:
-            row[column.name] = value.toString('utf8')
-            break
+          case ObjectId.Name:        row[column.name] = value.toString('utf8')           ; break
           case ObjectId.CharArray:
           case ObjectId.VarcharArray:
           case ObjectId.TextArray:
           case ObjectId.BpcharArray:
-          case ObjectId.NameArray:
-            row[column.name] = readArray(value, readUtf8String)
-            break
-          case ObjectId.Int2Array:
-            row[column.name] = readArray(value, readInt16)
-            break
-          case ObjectId.Int4Array:
-            row[column.name] = readArray(value, readInt32)
-            break
-          case ObjectId.Int8Array:
-            row[column.name] = readArray(value, readInt64)
-            break
-          case ObjectId.Float4Array:
-            row[column.name] = readArray(value, readFloat32)
-            break
-          case ObjectId.Float8Array:
-            row[column.name] = readArray(value, readFloat64)
-            break
-          case ObjectId.Bytea:
-            row[column.name] = value
-            break
+          case ObjectId.NameArray:   row[column.name] = readArray(value, readUtf8String) ; break
+          case ObjectId.Int2Array:   row[column.name] = readArray(value, readInt16)      ; break
+          case ObjectId.Int4Array:   row[column.name] = readArray(value, readInt32)      ; break
+          case ObjectId.Int8Array:   row[column.name] = readArray(value, readInt64)      ; break
+          case ObjectId.Float4Array: row[column.name] = readArray(value, readFloat32)    ; break
+          case ObjectId.Float8Array: row[column.name] = readArray(value, readFloat64)    ; break
+          case ObjectId.Bytea:       row[column.name] = value                            ; break
           default:
             console.warn(`[WARN] Unsupported column data type: ${ObjectId[column.type] || column.type}.`)
             row[column.name] = value
           }
         }
-
         rows.push(row as R)
       }
       else if (msgType === BackendMessage.BindComplete) {
@@ -734,7 +697,7 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
       }
       else if (msgType === BackendMessage.CommandComplete) {
         const commandTagParts = readCString(data, 5).split(' ')
-        const commandTag = commandTagParts[0] as CommandTag
+        const commandTag = commandTagParts[0]
         if (commandsWithRowsAffected.indexOf(commandTag) > -1)  {
           rowsAffected = parseInt(commandTagParts[commandTagParts.length - 1], 10)
         }
@@ -767,8 +730,8 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
     }
 
     conn.write(createBindMessage(paramValues, query, ''))
-    conn.write(createExecuteMessage(''))
-    conn.write(createSyncMessage())
+    conn.write(executeMessageUnnamedPortal)
+    conn.write(syncMessage)
   })
 }
 
@@ -795,30 +758,22 @@ function parseErrorResponse(data: Buffer): ParsedError[] {
 const sslRequestMessage = createSslRequestMessage()
 
 function createSslRequestMessage(): Buffer {
-  const size
-    = 4 // Message size
-    + 4 // SSL request code
-
+  // 8 = 4 (message size) + 4 (SSL request code)
+  const size = 8
   const message = Buffer.allocUnsafe(size)
-
-  writeInt32(message, 8, 0)
+  writeInt32(message, size, 0)
   writeInt32(message, 8087_7103, 4)
-
   return message
 }
 
 function createStartupMessage(username: string, database: string): Buffer {
-  let size
-    = 4 // Message size
-    + 4 // Protocol version
-    + 5 // "user" + 1
-    + Buffer.byteLength(username) + 1
-    + 1 // Null terminator
+  // 15 = 4 (message size) + 4 (protocol version) + 5 ("user" and null terminator) + 1 (username null terminator) + 1 (additional null terminator)
+  let size = 15 + Buffer.byteLength(username)
 
   const differentNames = database !== username
   if (differentNames) {
-    size += 9 // "database" + 1
-    size += Buffer.byteLength(database) + 1
+    // 10 = 9 ("database" and null terminator) + 1 (database null terminator)
+    size += 10 + Buffer.byteLength(database)
   }
 
   const message = Buffer.allocUnsafe(size)
@@ -850,34 +805,25 @@ function createCancelRequestMessage(processId: number, cancelKey: number): Buffe
 }
 
 function createCleartextPasswordMessage(password: string) {
-  const size
-    = 1 // Message type
-    + 4 // Message size
-    + Buffer.byteLength(password) + 1
-
+  // 6 = 1 (message type) + 4 (message size) + 1 (password null terminator)
+  const size = 6 + Buffer.byteLength(password)
   const message = Buffer.allocUnsafe(size)
-  let offset = 0
-
-  offset = writeUint8(message, FrontendMessage.PasswordMessage, offset)
-  offset = writeInt32(message, size - 1, offset)
-  writeCString(message, password, offset)
-
+  writeUint8(message, FrontendMessage.PasswordMessage, 0)
+  writeInt32(message, size - 1, 1)
+  writeCString(message, password, 5)
   return message
 }
 
 function createMd5PasswordMessage(username: string, password: string, salt: Buffer) {
   const credentialsMd5 = 'md5' + md5(Buffer.concat([Buffer.from(md5(password + username)), salt]))
-  const size
-    = 1 // Message type
-    + 4 // Message size
-    + Buffer.byteLength(credentialsMd5) + 1
 
+  // 6 = 1 (message type) + 4 (message size) + 1 (credentialsMd5 null terminator)
+  const size = 6 + Buffer.byteLength(credentialsMd5)
   const message = Buffer.allocUnsafe(size)
-  let offset = 0
 
-  offset = writeUint8(message, FrontendMessage.PasswordMessage, offset)
-  offset = writeInt32(message, size - 1, offset)
-  writeCString(message, credentialsMd5, offset)
+  writeUint8(message, FrontendMessage.PasswordMessage, 0)
+  writeInt32(message, size - 1, 1)
+  writeCString(message, credentialsMd5, 5)
 
   return message
 }
@@ -887,35 +833,23 @@ function md5(x: string | Buffer) {
 }
 
 function createQueryMessage(query: string): Buffer {
-  const bufferSize
-    = 1 // Message type
-    + 4 // Message size
-    + Buffer.byteLength(query) + 1
-
-  const message = Buffer.allocUnsafe(bufferSize)
-  let offset = 0
-
-  offset = writeUint8(message, FrontendMessage.Query, offset)
-  offset = writeInt32(message, bufferSize - 1, offset)
-  writeCString(message, query, offset)
-
+  // 6 = 1 (message type) + 4 (message size) + 1 (query null terminator)
+  const size = 6 + Buffer.byteLength(query)
+  const message = Buffer.allocUnsafe(size)
+  writeUint8(message, FrontendMessage.Query, 0)
+  writeInt32(message, size - 1, 1)
+  writeCString(message, query, 5)
   return message
 }
 
 function createParseMessage(query: string, queryId: string, paramTypes: ObjectId[]): Buffer {
-  const bufferSize
-    = 1 // Message type
-    + 4 // Message size
-    + Buffer.byteLength(queryId) + 1
-    + Buffer.byteLength(query) + 1
-    + 2 // Number of parameter data
-    + paramTypes.length * 4
-
-  const message = Buffer.allocUnsafe(bufferSize)
+  // 9 = 1 (message type) + 4 (message size) + 1 (queryId null terminator) + 1 (query null terminator) + 2 (number of parameter data)
+  const size = 9 + Buffer.byteLength(queryId) + Buffer.byteLength(query) + paramTypes.length * 4
+  const message = Buffer.allocUnsafe(size)
   let offset = 0
 
   offset = writeUint8(message, FrontendMessage.Parse, offset)
-  offset = writeInt32(message, bufferSize - 1, offset)
+  offset = writeInt32(message, size - 1, offset)
   offset = writeCString(message, queryId, offset)
   offset = writeCString(message, query, offset)
   offset = writeInt16(message, paramTypes.length, offset)
@@ -928,50 +862,26 @@ function createParseMessage(query: string, queryId: string, paramTypes: ObjectId
 }
 
 function createDescribeMessage(queryId: string): Buffer {
-  const bufferSize
-    = 1 // Message type
-    + 4 // Message size
-    + 1 // Describe message type
-    + Buffer.byteLength(queryId) + 1
-
-  const message = Buffer.allocUnsafe(bufferSize)
-  let offset = 0
-
-  offset = writeUint8(message, FrontendMessage.Describe, offset)
-  offset = writeInt32(message, bufferSize - 1, offset)
-  offset = writeUint8(message, DescribeOrCloseRequest.PreparedStatement, offset)
-  writeCString(message, queryId, offset)
-
+  // 7 = 1 (message type) + 4 (message size) + 1 (describe message type) + 1 (queryId null terminator)
+  const size = 7 + Buffer.byteLength(queryId)
+  const message = Buffer.allocUnsafe(size)
+  writeUint8(message, FrontendMessage.Describe, 0)
+  writeInt32(message, size - 1, 1)
+  writeUint8(message, DescribeOrCloseRequest.PreparedStatement, 5)
+  writeCString(message, queryId, 6)
   return message
 }
+
+const syncMessage = createSyncMessage()
 
 function createSyncMessage(): Buffer {
-  const bufferSize
-    = 1 // Message type
-    + 4 // Message size
-
-  const message = Buffer.allocUnsafe(bufferSize)
-  let offset = 0
-
-  offset = writeUint8(message, FrontendMessage.Sync, offset)
-  writeInt32(message, bufferSize - 1, offset)
-
+  // 5 = 1 (message type) + 4 (message size)
+  const size = 5
+  const message = Buffer.allocUnsafe(size)
+  writeUint8(message, FrontendMessage.Sync, 0)
+  writeInt32(message, size - 1, 1)
   return message
 }
-
-// function createFlushMessage(): Buffer {
-//   const bufferSize
-//     = 1 // Message type
-//     + 4 // Message size
-//
-//   const message = Buffer.allocUnsafe(bufferSize)
-//   let offset = 0
-//
-//   offset = writeUint8(message, FrontendMessage.Flush, offset)
-//   writeInt32(message, bufferSize - 1, offset)
-//
-//   return message
-// }
 
 function createBindMessage(paramValues: any[], query: PreparedQuery, portal: string): Buffer {
   const { queryId, paramTypes } = query
@@ -1025,7 +935,7 @@ function createBindMessage(paramValues: any[], query: PreparedQuery, portal: str
     case ObjectId.TextArray:
     case ObjectId.BpcharArray:
     case ObjectId.NameArray:
-      bufferSize += 20 + sum((v as string[]).map(s => Buffer.byteLength(s)))
+      bufferSize += 20 + byteLengthSum(v as string[])
       break
     case ObjectId.Numeric:
       // TODO Find cheaper way to calculate this (try to avoid the whole switch altogether).
@@ -1153,29 +1063,25 @@ function createBindMessage(paramValues: any[], query: PreparedQuery, portal: str
   return message
 }
 
-function sum(arr: number[]): number {
+function byteLengthSum(arr: string[]): number {
   let s = 0
   for (let i = 0; i < arr.length; ++i) {
-    s += arr[i]
+    s += Buffer.byteLength(arr[i])
   }
   return s
 }
 
+const executeMessageUnnamedPortal = createExecuteMessage('')
+
 function createExecuteMessage(portal: string): Buffer {
-  const bufferSize
-    = 1 // Message type
-    + 4 // Message size
-    + Buffer.byteLength(portal) + 1
-    + 4 // Maximum number of rows to return
-
-  const message = Buffer.allocUnsafe(bufferSize)
+  // 10 = 1 (message type) + 4 (message size) + 1 (portal null terminator) + 4 (maximum number of rows to return)
+  const size = 10 + Buffer.byteLength(portal)
+  const message = Buffer.allocUnsafe(size)
   let offset = 0
-
   offset = writeUint8(message, FrontendMessage.Execute, offset)
-  offset = writeInt32(message, bufferSize - 1, offset)
+  offset = writeInt32(message, size - 1, offset)
   offset = writeCString(message, portal, offset)
   writeInt32(message, 0, offset)
-
   return message
 }
 
@@ -1237,14 +1143,14 @@ function readInt16(buffer: Buffer, offset: number): number {
   return value | (value & 32768) * 0x1fffe
 }
 
-function readUint16(buffer: Buffer, offset: number): number {
-  return buffer[offset] * 256 + buffer[offset + 1]
-}
-
 function writeInt16(buffer: Buffer, value: number, offset: number): number {
   buffer[offset++] = value >> 8
   buffer[offset++] = value
   return offset
+}
+
+function readUint16(buffer: Buffer, offset: number): number {
+  return buffer[offset] * 256 + buffer[offset + 1]
 }
 
 function writeUint16(buffer: Buffer, value: number, offset: number): number {
@@ -1268,45 +1174,8 @@ function writeInt32(buffer: Buffer, value: number, offset: number): number {
   return offset
 }
 
-function readArray<T>(buffer: Buffer, readElem: (buffer: Buffer, offset: number, size: number) => T): T[] {
-  let offset = 0
-  // const dimensions     = readInt32(buffer, offset)
-  // const hasNulls       = readInt32(buffer, offset += 4) as 0 | 1
-  offset += 4
-  // const elemType       = readUint32(buffer, offset += 4) as ObjectId
-  offset += 4
-  const dimensionSize  = readInt32(buffer, offset += 4)
-  // const dimensionStart = readInt32(buffer, offset += 4)
-  offset += 4
-  offset += 4
-
-  const result: T[] = []
-  for (let i = 0; i < dimensionSize; ++i) {
-    const elemSize = readInt32(buffer, offset)
-    offset += 4
-    const elem = readElem(buffer, offset, elemSize)
-    offset += elemSize
-    result.push(elem)
-  }
-  return result
-}
-
-function writeArray<T>(buffer: Buffer, values: T[], offset: number, elemType: ObjectId, writeElem: (buffer: Buffer, value: T, offset: number) => number): number {
-  offset = writeInt32(buffer, 1, offset) // Number of dimensions
-  offset = writeInt32(buffer, 0, offset) // Has nulls?
-  offset = writeUint32(buffer, elemType, offset) // Element type
-  offset = writeInt32(buffer, values.length, offset) // Size of first dimension
-  offset = writeInt32(buffer, 1, offset) // Offset (starting index) of first dimension
-  for (const v of values) {
-    const elemOffset = offset + 4
-    offset = writeElem(buffer, v, elemOffset)
-    writeInt32(buffer, offset - elemOffset, elemOffset - 4)
-  }
-  return offset
-}
-
 function readUint32(buffer: Buffer, offset: number): number {
-  return buffer[offset] * (2 ** 24)
+  return buffer[offset] * 16_777_216
     + (buffer[++offset] << 16)
     + (buffer[++offset] << 8)
     + buffer[++offset]
@@ -1329,7 +1198,7 @@ function readInt64(buffer: Buffer, offset: number): bigint {
 
   return (BigInt(value) << 32n) +
     BigInt(
-      (buffer[++offset] * (2 ** 24)) +
+      (buffer[++offset] * 16_777_216) +
       (buffer[++offset] << 16) +
       (buffer[++offset] << 8) +
       buffer[++offset]
@@ -1337,7 +1206,7 @@ function readInt64(buffer: Buffer, offset: number): bigint {
 }
 
 function writeInt64(buffer: Buffer, value: bigint, offset: number): number {
-  let lo = Number(value & 4294967295n)
+  let lo = Number(value & 4_294_967_295n)
   buffer[offset + 7] = lo
   lo = lo >> 8
   buffer[offset + 6] = lo
@@ -1346,7 +1215,7 @@ function writeInt64(buffer: Buffer, value: bigint, offset: number): number {
   lo = lo >> 8
   buffer[offset + 4] = lo
 
-  let hi = Number(value >> 32n & 4294967295n)
+  let hi = Number(value >> 32n & 4_294_967_295n)
   buffer[offset + 3] = hi
   hi = hi >> 8
   buffer[offset + 2] = hi
@@ -1491,7 +1360,7 @@ function readNumeric(buffer: Buffer, offset: number): string {
       const digit = readNumericDigit(buffer, i)
       i++
       weight--
-      result += ('' + (10000 + digit)).substr(1)
+      result += ('' + (10_000 + digit)).substr(1)
     }
 
     while (weight >= 0) {
@@ -1516,7 +1385,7 @@ function readNumeric(buffer: Buffer, offset: number): string {
     while (-4 * weight <= decimalsCount) {
       if (i < digitsCount) {
         const digit = readNumericDigit(buffer, i)
-        result += ('' + (10000 + digit)).substr(1)
+        result += ('' + (10_000 + digit)).substr(1)
       } else {
         result += '0000'
       }
@@ -1525,7 +1394,7 @@ function readNumeric(buffer: Buffer, offset: number): string {
     }
 
     const digit = i < digitsCount ? readNumericDigit(buffer, i) : 0
-    result += ('' + (10000 + digit)).substr(1, decimalsCount % 4)
+    result += ('' + (10_000 + digit)).substr(1, decimalsCount % 4)
   }
 
   return result
@@ -1540,7 +1409,7 @@ function writeNumeric(buffer: Buffer, value: string, offset: number): number {
   if (value === 'NaN') {
     writeUint16(buffer, 0, offset) // Number of digits
     writeInt16(buffer, 0, offset + 2) // Weight
-    writeUint16(buffer, NumericSign.NaN, offset + 4) // Wign
+    writeUint16(buffer, NumericSign.NaN, offset + 4) // Sign
     return writeUint16(buffer, 0, offset + 6) // Number of decimals
   }
 
@@ -1581,13 +1450,13 @@ function writeNumeric(buffer: Buffer, value: string, offset: number): number {
 const postgresEpoch = new Date('2000-01-01T00:00:00Z').getTime()
 
 function readTimestamp(buffer: Buffer, offset: number): Date {
-  const value = (2 ** 32) * readInt32(buffer, offset) + readUint32(buffer, offset + 4)
-  return new Date(Math.round(value / 1000) + postgresEpoch)
+  const value = 4_294_967_296 * readInt32(buffer, offset) + readUint32(buffer, offset + 4)
+  return new Date(Math.round(value / 1_000) + postgresEpoch)
 }
 
 function writeTimestamp(buffer: Buffer, value: Date, offset: number): number {
   const t = (value.getTime() - postgresEpoch) * 1_000
-  offset = writeInt32(buffer, t / (2 ** 32), offset)
+  offset = writeInt32(buffer, t / 4_294_967_296, offset)
   return writeUint32(buffer, t, offset)
 }
 
@@ -1601,9 +1470,7 @@ function writeUtf8String(buffer: Buffer, value: string, offset: number): number 
 
 function readCString(buffer: Buffer, offset: number): string {
   let end = offset
-  while (buffer[end] !== 0) {
-    ++end
-  }
+  while (buffer[end] !== 0) ++end
   return buffer.slice(offset, end).toString('ascii')
 }
 
@@ -1613,77 +1480,116 @@ function writeCString(buffer: Buffer, value: string, offset: number): number {
   return offset
 }
 
-enum FrontendMessage {
-  Bind            = 'B'.charCodeAt(0),
-  Close           = 'C'.charCodeAt(0),
-  CopyData        = 'd'.charCodeAt(0),
-  CopyDone        = 'c'.charCodeAt(0),
-  Describe        = 'D'.charCodeAt(0),
-  Execute         = 'E'.charCodeAt(0),
-  Flush           = 'H'.charCodeAt(0),
-  FunctionCall    = 'F'.charCodeAt(0),
-  Parse           = 'P'.charCodeAt(0),
-  PasswordMessage = 'p'.charCodeAt(0),
-  Query           = 'Q'.charCodeAt(0),
-  Sync            = 'S'.charCodeAt(0),
-  Terminate       = 'X'.charCodeAt(0),
+function readArray<T>(buffer: Buffer, readElem: (buffer: Buffer, offset: number, size: number) => T): T[] {
+  let offset = 0
+  /* const dimensions     = readInt32(buffer, offset)              ; */ offset += 4
+  /* const hasNulls       = readInt32(buffer, offset) as 0 | 1     ; */ offset += 4
+  /* const elemType       = readUint32(buffer, offset) as ObjectId ; */ offset += 4
+  const dimensionSize  = readInt32(buffer, offset)              ; offset += 4
+  /* const dimensionStart = readInt32(buffer, offset)              ; */ offset += 4
+
+  const result: T[] = []
+  for (let i = 0; i < dimensionSize; ++i) {
+    const elemSize = readInt32(buffer, offset)          ; offset += 4
+    const elem     = readElem(buffer, offset, elemSize) ; offset += elemSize
+    result.push(elem)
+  }
+  return result
+}
+
+function writeArray<T>(buffer: Buffer, values: T[], offset: number, elemType: ObjectId, writeElem: (buffer: Buffer, value: T, offset: number) => number): number {
+  offset = writeInt32(buffer, 1, offset)             // Number of dimensions
+  offset = writeInt32(buffer, 0, offset)             // Has nulls?
+  offset = writeUint32(buffer, elemType, offset)     // Element type
+  offset = writeInt32(buffer, values.length, offset) // Size of first dimension
+  offset = writeInt32(buffer, 1, offset)             // Offset (starting index) of first dimension
+  for (const v of values) {
+    const elemOffset = offset + 4
+    offset = writeElem(buffer, v, elemOffset)
+    writeInt32(buffer, offset - elemOffset, elemOffset - 4)
+  }
+  return offset
+}
+
+const enum FrontendMessage {
+  Bind            =  66, // 'B'
+  Close           =  67, // 'C'
+  CopyData        = 100, // 'd'
+  CopyDone        =  99, // 'c'
+  Describe        =  68, // 'D'
+  Execute         =  69, // 'E'
+  Flush           =  72, // 'H'
+  FunctionCall    =  70, // 'F'
+  Parse           =  80, // 'P'
+  PasswordMessage = 112, // 'p'
+  Query           =  81, // 'Q'
+  Sync            =  83, // 'S'
+  Terminate       =  88, // 'X'
 }
 
 enum BackendMessage {
-  Authentication           = 'R'.charCodeAt(0),
-  BackendKeyData           = 'K'.charCodeAt(0),
-  BindComplete             = '2'.charCodeAt(0),
-  CloseComplete            = '3'.charCodeAt(0),
-  CommandComplete          = 'C'.charCodeAt(0),
-  CopyBothResponse         = 'W'.charCodeAt(0),
-  CopyData                 = 'd'.charCodeAt(0),
-  CopyDone                 = 'c'.charCodeAt(0),
-  CopyInResponse           = 'G'.charCodeAt(0),
-  CopyOutResponse          = 'H'.charCodeAt(0),
-  DataRow                  = 'D'.charCodeAt(0),
-  EmptyQueryResponse       = 'I'.charCodeAt(0),
-  ErrorResponse            = 'E'.charCodeAt(0),
-  FunctionCallResponse     = 'V'.charCodeAt(0),
-  NegotiateProtocolVersion = 'v'.charCodeAt(0),
-  NoData                   = 'n'.charCodeAt(0),
-  NoticeResponse           = 'N'.charCodeAt(0),
-  NotificationResponse     = 'A'.charCodeAt(0),
-  ParameterDescription     = 't'.charCodeAt(0),
-  ParameterStatus          = 'S'.charCodeAt(0),
-  ParseComplete            = '1'.charCodeAt(0),
-  PortalSuspended          = 's'.charCodeAt(0),
-  ReadyForQuery            = 'Z'.charCodeAt(0),
-  RowDescription           = 'T'.charCodeAt(0),
+  Authentication           =  82, // 'R'
+  BackendKeyData           =  75, // 'K'
+  BindComplete             =  50, // '2'
+  CloseComplete            =  51, // '3'
+  CommandComplete          =  67, // 'C'
+  CopyBothResponse         =  87, // 'W'
+  CopyData                 = 100, // 'd'
+  CopyDone                 =  99, // 'c'
+  CopyInResponse           =  71, // 'G'
+  CopyOutResponse          =  72, // 'H'
+  DataRow                  =  68, // 'D'
+  EmptyQueryResponse       =  73, // 'I'
+  ErrorResponse            =  69, // 'E'
+  FunctionCallResponse     =  86, // 'V'
+  NegotiateProtocolVersion = 118, // 'v'
+  NoData                   = 110, // 'n'
+  NoticeResponse           =  78, // 'N'
+  NotificationResponse     =  65, // 'A'
+  ParameterDescription     = 116, // 't'
+  ParameterStatus          =  83, // 'S'
+  ParseComplete            =  49, // '1'
+  PortalSuspended          = 115, // 's'
+  ReadyForQuery            =  90, // 'Z'
+  RowDescription           =  84, // 'T'
 }
 
-enum ErrorResponseType {
-  SeverityLocalized = 'S'.charCodeAt(0),
-  Severity          = 'V'.charCodeAt(0),
-  Code              = 'C'.charCodeAt(0),
-  Message           = 'M'.charCodeAt(0),
-  Detail            = 'D'.charCodeAt(0),
-  Hint              = 'H'.charCodeAt(0),
-  Position          = 'P'.charCodeAt(0),
-  InternalPosition  = 'p'.charCodeAt(0),
-  Where             = 'W'.charCodeAt(0),
-  SchemaName        = 's'.charCodeAt(0),
-  ColumnName        = 'c'.charCodeAt(0),
-  DateTypeName      = 'd'.charCodeAt(0),
-  ConstraintName    = 'n'.charCodeAt(0),
-  File              = 'F'.charCodeAt(0),
-  Line              = 'L'.charCodeAt(0),
-  Routine           = 'R'.charCodeAt(0),
+const enum ErrorResponseType {
+  Code              =  67, // 'C'
+  ColumnName        =  99, // 'c'
+  ConstraintName    = 110, // 'n'
+  DateTypeName      = 100, // 'd'
+  Detail            =  68, // 'D'
+  File              =  70, // 'F'
+  Hint              =  72, // 'H'
+  InternalPosition  = 112, // 'p'
+  Line              =  76, // 'L'
+  Message           =  77, // 'M'
+  Position          =  80, // 'P'
+  Routine           =  82, // 'R'
+  SchemaName        = 115, // 's'
+  Severity          =  86, // 'V'
+  SeverityLocalized =  83, // 'S'
+  Where             =  87, // 'W'
 }
 
-enum DescribeOrCloseRequest {
-  PreparedStatement = 'S'.charCodeAt(0),
-  Portal            = 'P'.charCodeAt(0),
+const enum DescribeOrCloseRequest {
+  Portal            = 80, // 'P'
+  PreparedStatement = 83, // 'S'
 }
 
 enum AuthenticationResponse {
   Ok                = 0,
+  KerberosV5        = 2,
   CleartextPassword = 3,
-  Md5               = 5,
+  Md5Password       = 5,
+  SmcCredential     = 6,
+  Gss               = 7,
+  GssContinue       = 8,
+  Sspi              = 9,
+  Sasl              = 10,
+  SaslContinue      = 11,
+  SaslFinal         = 12,
 }
 
 const enum WireFormat {
@@ -1691,13 +1597,11 @@ const enum WireFormat {
   Binary = 1,
 }
 
-// enum TransactionStatus {
-//   Idle                     = 'I'.charCodeAt(0),
-//   InTransactionBlock       = 'T'.charCodeAt(0),
-//   InFailedTransactionBlock = 'E'.charCodeAt(0),
+// const enum TransactionStatus {
+//   Idle                     = 73, // 'I'
+//   InTransactionBlock       = 84, // 'T'
+//   InFailedTransactionBlock = 69, // 'E'
 // }
-
-type CommandTag = string // 'CREATE' | 'INSERT' | 'DELETE' | 'UPDATE' | 'SELECT' | 'MOVE' | 'FETCH' | 'COPY'
 
 export enum ObjectId {
   Aclitem               = 1033,
@@ -1774,9 +1678,9 @@ export enum ObjectId {
   Lseg                  = 601,
   LsegArray             = 1018,
   Macaddr               = 829,
+  MacaddrArray          = 1040,
   Macaddr8              = 774,
   Macaddr8Array         = 775,
-  MacaddrArray          = 1040,
   Money                 = 790,
   MoneyArray            = 791,
   Name                  = 19,
@@ -1864,9 +1768,9 @@ export enum ObjectId {
   VarcharArray          = 1015,
   Void                  = 2278,
   Xid                   = 28,
+  XidArray              = 1011,
   Xid8                  = 5069,
   Xid8Array             = 271,
-  XidArray              = 1011,
   Xml                   = 142,
   XmlArray              = 143,
 }

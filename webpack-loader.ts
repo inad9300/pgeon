@@ -55,8 +55,8 @@ async function getQueryType(query: string): Promise<string> {
 }
 
 async function getRowType({ columnMetadata }: QueryMetadata): Promise<string> {
-  const tableIds = columnMetadata.map(col => col.tableId).filter(x => !!x)
-  const colPositions = columnMetadata.map(col => col.positionInTable).filter(x => !!x)
+  const tableIds = columnMetadata.map(col => col.tableId).filter(x => !!x) as number[]
+  const colPositions = columnMetadata.map(col => col.positionInTable).filter(x => !!x) as number[]
 
   const colNullability: Row[] = []
   if (tableIds.length > 0 && columnMetadata.length > 0) {
