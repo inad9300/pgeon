@@ -75,7 +75,8 @@ async function getRowType({ columnMetadata }: QueryMetadata): Promise<string> {
 
   const colTypes: string[] = []
   for (const col of columnMetadata) {
-    let colType = `${col.name}: ${getTypeScriptType(col.type)}`
+    const colName = /^[_a-zA-Z][_a-zA-Z0-9]*$/.test(col.name) ? col.name : `'${col.name}'`
+    let colType = `${colName}: ${getTypeScriptType(col.type)}`
     if (col.tableId) {
       const cn = colNullability.find(r => r.oid === col.tableId && r.ordinal_position === col.positionInTable)
       if (cn?.is_nullable !== 'NO') {
