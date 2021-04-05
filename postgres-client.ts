@@ -582,9 +582,11 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
       }
     }
 
-    conn.write(createParseMessage(query, queryId, paramTypes!))
-    conn.write(createDescribeMessage(queryId))
-    conn.write(syncMessage)
+    conn.write(Buffer.concat([
+      createParseMessage(query, queryId, paramTypes!),
+      createDescribeMessage(queryId),
+      syncMessage
+    ]))
   })
 }
 
@@ -729,9 +731,11 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
       }
     }
 
-    conn.write(createBindMessage(paramValues, query, ''))
-    conn.write(executeMessageUnnamedPortal)
-    conn.write(syncMessage)
+    conn.write(Buffer.concat([
+      createBindMessage(paramValues, query, ''),
+      executeUnnamedPortalMessage,
+      syncMessage
+    ]))
   })
 }
 
@@ -1005,7 +1009,7 @@ function byteLengthSum(arr: string[]): number {
   return s
 }
 
-const executeMessageUnnamedPortal = createExecuteMessage('')
+const executeUnnamedPortalMessage = createExecuteMessage('')
 
 function createExecuteMessage(portal: string): Buffer {
   // 10 = 1 (message type) + 4 (message size) + 1 (portal null terminator) + 4 (maximum number of rows to return)

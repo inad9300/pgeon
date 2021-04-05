@@ -1,6 +1,7 @@
 import { newPool, Client, ObjectId, QueryCancelledError } from './postgres-client'
 import { ok, deepStrictEqual as eq } from 'assert'
 
+const start = process.hrtime()
 const pool = newPool()
 
 const tests: Promise<any>[] = []
@@ -357,6 +358,9 @@ Promise
 function exit(code: 0): void
 function exit(code: 1, err: any): void
 function exit(code: 0 | 1, err?: any) {
-  console[code ? 'error' : 'log'](code ? '👎' : '👍', code ? err : '')
+  const end = process.hrtime(start)
+  code
+    ? console.error('👎', err)
+    : console.log('👍', `${end[0] * 1_000 + end[1] / 1_000_000} ms`)
   process.exit(code)
 }
