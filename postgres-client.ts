@@ -304,7 +304,7 @@ function createAndSecureConnection(options: PoolOptions): Promise<Socket> {
       socket.once('connect', () => socket.write(sslRequestMessage))
 
       socket.once('data', data => {
-        if (data.toString() === 'S') {
+        if (readUint8(data, 0) === 83) { // 'S'
           resolve(createTlsConnection({ socket, ...options.ssl }))
         } else {
           const err = Error('Postgres server does not support SSL.')
