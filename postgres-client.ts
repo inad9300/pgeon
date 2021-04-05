@@ -1517,7 +1517,7 @@ enum AuthenticationResponse {
   KerberosV5        = 2,
   CleartextPassword = 3,
   Md5Password       = 5,
-  SmcCredential     = 6,
+  ScmCredential     = 6,
   Gss               = 7,
   GssContinue       = 8,
   Sspi              = 9,
