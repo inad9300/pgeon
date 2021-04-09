@@ -5,15 +5,15 @@
   "license": "AGPL-3.0",
   "homepage": "https://github.com/inad9300/pgeon",
   "repository": {
-      "type": "git",
-      "url": "https://github.com/inad9300/pgeon"
+    "type": "git",
+    "url": "https://github.com/inad9300/pgeon"
   },
   "bugs": {
-      "url": "https://github.com/inad9300/pgeon/issues"
+    "url": "https://github.com/inad9300/pgeon/issues"
   },
   "author": {
-      "name": "Daniel Martín",
-      "email": "inad9300@gmail.com"
+    "name": "Daniel Martín",
+    "email": "inad9300@gmail.com"
   },
   "keywords": [
     "Postgres",
@@ -27,7 +27,7 @@
   ],
   "scripts": {
     "test": "tsc && node postgres-client-tests.js",
-    "start": "webpack --mode production && node dist/main.js"
+    "example": "webpack --config example.webpack.config.ts --mode production && node dist/main.js"
   },
   "devDependencies": {
     "@types/node": "14.14.36",
