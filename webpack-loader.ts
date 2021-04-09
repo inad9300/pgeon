@@ -11,7 +11,7 @@ export default function pgeonLoader(this: any, source: string) {
   if (!closeScheduled) {
     closeScheduled = true
     const compiler = this._compiler as Compiler
-    compiler.hooks.done.tap('hooks::done', () => pool.close())
+    compiler.hooks.done.tap('hooks::done', pool.destroy)
   }
 
   getSourceWithQueryTypes(source).then(typedSource => callback(null, typedSource))

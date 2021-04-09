@@ -66,7 +66,7 @@ export interface Client {
 export interface Pool extends Client {
   getQueryMetadata(query: string): Promise<QueryMetadata>
   transaction(callback: (client: Client) => Promise<void>): Promise<void>
-  close(): void
+  destroy(): void
 }
 
 interface PreparedQuery extends QueryMetadata {
@@ -277,7 +277,7 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
           })
       })
     },
-    close() {
+    destroy() {
       const connPoolCopy = [...connPool]
       options.minConnections
         = options.maxConnections
@@ -661,32 +661,35 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
           }
           const value = data.slice(offset, offset += valueSize)
           switch (column.type) {
-          case ObjectId.Bool:        row[column.name] = value[0] !== 0                   ; break
-          case ObjectId.Int2:        row[column.name] = readInt16(value, 0)              ; break
-          case ObjectId.Int4:        row[column.name] = readInt32(value, 0)              ; break
-          case ObjectId.Int8:        row[column.name] = readInt64(value, 0)              ; break
-          case ObjectId.Float4:      row[column.name] = readFloat32(value, 0)            ; break
-          case ObjectId.Float8:      row[column.name] = readFloat64(value, 0)            ; break
-          case ObjectId.Numeric:     row[column.name] = readNumeric(value, 0)            ; break
+          case ObjectId.Bool:        row[column.name] = value[0] !== 0          ; break
+          case ObjectId.Int2:        row[column.name] = readInt16(value, 0)     ; break
+          case ObjectId.Int4:        row[column.name] = readInt32(value, 0)     ; break
+          case ObjectId.Int8:        row[column.name] = readInt64(value, 0)     ; break
+          case ObjectId.Float4:      row[column.name] = readFloat32(value, 0)   ; break
+          case ObjectId.Float8:      row[column.name] = readFloat64(value, 0)   ; break
+          case ObjectId.Numeric:     row[column.name] = readNumeric(value, 0)   ; break
           case ObjectId.Timestamp:
-          case ObjectId.Timestamptz: row[column.name] = readTimestamp(value, 0)          ; break
-          case ObjectId.Oid:         row[column.name] = readUint32(value, 0)             ; break
+          case ObjectId.Timestamptz: row[column.name] = readTimestamp(value, 0) ; break
+          case ObjectId.Oid:
+          case ObjectId.Regproc:     row[column.name] = readUint32(value, 0)    ; break
           case ObjectId.Char:
           case ObjectId.Varchar:
           case ObjectId.Text:
           case ObjectId.Bpchar:
-          case ObjectId.Name:        row[column.name] = value.toString('utf8')           ; break
+          case ObjectId.Name:        row[column.name] = value.toString('utf8')  ; break
           case ObjectId.CharArray:
           case ObjectId.VarcharArray:
           case ObjectId.TextArray:
           case ObjectId.BpcharArray:
-          case ObjectId.NameArray:   row[column.name] = readArray(value, readUtf8String) ; break
-          case ObjectId.Int2Array:   row[column.name] = readArray(value, readInt16)      ; break
-          case ObjectId.Int4Array:   row[column.name] = readArray(value, readInt32)      ; break
-          case ObjectId.Int8Array:   row[column.name] = readArray(value, readInt64)      ; break
-          case ObjectId.Float4Array: row[column.name] = readArray(value, readFloat32)    ; break
-          case ObjectId.Float8Array: row[column.name] = readArray(value, readFloat64)    ; break
-          case ObjectId.Bytea:       row[column.name] = value                            ; break
+          case ObjectId.NameArray:   row[column.name] = readArray(value, readUtf8String)            ; break
+          case ObjectId.Int2Array:   row[column.name] = readArray(value, readInt16)                 ; break
+          case ObjectId.Int4Array:   row[column.name] = readArray(value, readInt32)                 ; break
+          case ObjectId.Int8Array:   row[column.name] = readArray(value, readInt64)                 ; break
+          case ObjectId.Float4Array: row[column.name] = readArray(value, readFloat32)               ; break
+          case ObjectId.Float8Array: row[column.name] = readArray(value, readFloat64)               ; break
+          case ObjectId.Bytea:       row[column.name] = value                                       ; break
+          case ObjectId.Jsonb:       row[column.name] = JSON.parse(value.slice(1).toString('utf8')) ; break
+          case ObjectId.Json:        row[column.name] = JSON.parse(value.toString('utf8'))          ; break
           default:
             console.warn(`[WARN] Unsupported column data type: ${ObjectId[column.type] || column.type}.`)
             row[column.name] = value
@@ -913,7 +916,8 @@ function createBindMessage(paramValues: any[], query: PreparedQuery, portal: str
     case ObjectId.Int2:         bufferSize += 2 ; break
     case ObjectId.Int4:
     case ObjectId.Float4:
-    case ObjectId.Oid:          bufferSize += 4 ; break
+    case ObjectId.Oid:
+    case ObjectId.Regproc:      bufferSize += 4 ; break
     case ObjectId.Int8:
     case ObjectId.Float8:
     case ObjectId.Timestamp:
@@ -926,6 +930,8 @@ function createBindMessage(paramValues: any[], query: PreparedQuery, portal: str
     // TODO Find cheaper way to calculate this (try to avoid the whole switch altogether).
     case ObjectId.Numeric:      bufferSize += writeNumeric(Buffer.allocUnsafe(8 + 2 * (v as string).length), v as string, 0) ; break
     case ObjectId.Bytea:        bufferSize += (v as Buffer).length                                                           ; break
+    case ObjectId.Json:         bufferSize += JSON.stringify(v).length                                                       ; break
+    case ObjectId.Jsonb:        bufferSize += 1 + JSON.stringify(v).length                                                   ; break
     case ObjectId.CharArray:
     case ObjectId.VarcharArray:
     case ObjectId.TextArray:
@@ -966,7 +972,8 @@ function createBindMessage(paramValues: any[], query: PreparedQuery, portal: str
     case ObjectId.Bool:        offset = writeUint8(message, +(v as boolean), offset) ; break
     case ObjectId.Int2:        offset = writeInt16(message, v as number, offset)     ; break
     case ObjectId.Int4:        offset = writeInt32(message, v as number, offset)     ; break
-    case ObjectId.Oid:         offset = writeUint32(message, v as number, offset)    ; break
+    case ObjectId.Oid:
+    case ObjectId.Regproc:     offset = writeUint32(message, v as number, offset)    ; break
     case ObjectId.Int8:        offset = writeInt64(message, v as bigint, offset)     ; break
     case ObjectId.Float4:      offset = writeFloat32(message, v as number, offset)   ; break
     case ObjectId.Float8:      offset = writeFloat64(message, v as number, offset)   ; break
@@ -979,6 +986,8 @@ function createBindMessage(paramValues: any[], query: PreparedQuery, portal: str
     case ObjectId.Name:         offset = writeUtf8String(message, v as string, offset)                                 ; break
     case ObjectId.Numeric:      offset = writeNumeric(message, v as string, offset)                                    ; break
     case ObjectId.Bytea:        offset += (v as Buffer).copy(message, offset)                                          ; break
+    case ObjectId.Json:         offset = writeUtf8String(message, JSON.stringify(v), offset)                           ; break
+    case ObjectId.Jsonb:        offset = writeUtf8String(message, String.fromCharCode(1) + JSON.stringify(v), offset)  ; break
     case ObjectId.CharArray:    offset = writeArray(message, v as string[], offset, ObjectId.Char, writeUtf8String)    ; break
     case ObjectId.VarcharArray: offset = writeArray(message, v as string[], offset, ObjectId.Varchar, writeUtf8String) ; break
     case ObjectId.TextArray:    offset = writeArray(message, v as string[], offset, ObjectId.Text, writeUtf8String)    ; break
@@ -1032,6 +1041,7 @@ export function getTypeScriptType(pgType: ObjectId) {
   case ObjectId.Float4:
   case ObjectId.Float8:
   case ObjectId.Oid:
+  case ObjectId.Regproc:
     return 'number'
   case ObjectId.Int8:
     return 'bigint'
@@ -1061,6 +1071,9 @@ export function getTypeScriptType(pgType: ObjectId) {
     return 'bigint[]'
   case ObjectId.Bytea:
     return 'Buffer'
+  case ObjectId.Json:
+  case ObjectId.Jsonb:
+    return 'any'
   default:
     console.warn(`[WARN] Tried mapping an unsupported type to TypeScript: ${ObjectId[pgType] || pgType}`)
     return 'any'

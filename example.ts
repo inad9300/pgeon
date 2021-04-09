@@ -10,9 +10,9 @@ pool.runStaticQuery`
   limit ${limit}::int4
 `
 .then(res => {
-  setTimeout(pool.close)
   console.debug('Query result:', res)
 
   const oid: string = res.rows[0].oid
   return oid
 })
+.finally(pool.destroy)

@@ -346,6 +346,74 @@ tests[t++] = pool
     eq(rows[0].c.toString('utf8'), '🍅🥔')
   })
 
+tests[t++] = pool
+  .runStaticQuery`
+    select
+      '5'::json a,
+      '"5"'::json b,
+      'null'::json c,
+      'true'::json d,
+      '[{ "x": 0 }]'::json e
+  `
+  .then(({ rows }) => {
+    eq(rows[0].a, 5)
+    eq(rows[0].b, '5')
+    eq(rows[0].c, null)
+    eq(rows[0].d, true)
+    eq(rows[0].e, [{ x: 0 }])
+  })
+
+tests[t++] = pool
+  .runStaticQuery`
+    select
+      '5'::jsonb a,
+      '"5"'::jsonb b,
+      'null'::jsonb c,
+      'true'::jsonb d,
+      '[{ "x": 0 }]'::jsonb e
+  `
+  .then(({ rows }) => {
+    eq(rows[0].a, 5)
+    eq(rows[0].b, '5')
+    eq(rows[0].c, null)
+    eq(rows[0].d, true)
+    eq(rows[0].e, [{ x: 0 }])
+  })
+
+tests[t++] = pool
+  .runStaticQuery`
+    select
+      ${5}::json a,
+      ${'5'}::json b,
+      ${null}::json c,
+      ${true}::json d,
+      ${[{ "x": 0 }]}::json e
+  `
+  .then(({ rows }) => {
+    eq(rows[0].a, 5)
+    eq(rows[0].b, '5')
+    eq(rows[0].c, null)
+    eq(rows[0].d, true)
+    eq(rows[0].e, [{ x: 0 }])
+  })
+
+tests[t++] = pool
+  .runStaticQuery`
+    select
+      ${5}::jsonb a,
+      ${'5'}::jsonb b,
+      ${null}::jsonb c,
+      ${true}::jsonb d,
+      ${[{ "x": 0 }]}::jsonb e
+  `
+  .then(({ rows }) => {
+    eq(rows[0].a, 5)
+    eq(rows[0].b, '5')
+    eq(rows[0].c, null)
+    eq(rows[0].d, true)
+    eq(rows[0].e, [{ x: 0 }])
+  })
+
 
 // Kickoff.
 
@@ -353,7 +421,7 @@ Promise
   .all(tests)
   .then(() => exit(0))
   .catch(err => exit(1, err))
-  .finally(() => pool.close())
+  .finally(pool.destroy)
 
 function exit(code: 0): void
 function exit(code: 1, err: any): void
