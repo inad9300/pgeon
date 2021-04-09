@@ -291,57 +291,49 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   }
 }
 
-function createAndSecureConnection(options: PoolOptions): Promise<Socket> {
-  return new Promise((resolve, reject) => {
-    const socket = createTcpConnection(options.port, options.host)
+function openConnection(options: PoolOptions, connCount: { value: number }): Promise<Connection> {
+  return new Promise(async (resolve, reject) => {
+    const connectTimeoutId = setTimeout(
+      () => handleStartupPhaseError(Error('Stopping connection attempt as it has been going on for too long.')),
+      options.connectTimeout
+    )
 
-    socket.on('error', err => {
-      socket.destroy(err)
+    const conn = createTcpConnection(options.port, options.host) as Connection
+
+    function handleStartupPhaseError(err: Error) {
       reject(err)
-    })
+      conn?.destroy(err)
+    }
 
     if (options.ssl) {
-      socket.once('connect', () => socket.write(sslRequestMessage))
-
-      socket.once('data', data => {
+      conn.once('connect', () => {
+        conn.write(sslRequestMessage)
+        conn.on('data', handleStartupPhase)
+      })
+      conn.once('data', data => {
         if (readUint8(data, 0) === 83) { // 'S'
-          resolve(createTlsConnection({ socket, ...options.ssl }))
+          createTlsConnection({ socket: conn, ...options.ssl })
         } else {
-          const err = Error('Postgres server does not support SSL.')
-          socket.destroy(err)
-          reject(err)
+          handleStartupPhaseError(Error('Postgres server does not support SSL.'))
         }
       })
     } else {
-      socket.once('connect', () => resolve(socket))
+      conn.once('connect', () => {
+        conn.write(createStartupMessage(options.username, options.database))
+        conn.on('data', handleStartupPhase)
+      })
     }
-  })
-}
 
-function openConnection(options: PoolOptions, connCount: { value: number }): Promise<Connection> {
-  return new Promise(async (resolve, reject) => {
-    const connectTimeoutId = setTimeout(() => {
-      const err = Error('Stopping connection attempt as it has been going on for too long.')
-      conn?.destroy(err)
-      reject(err)
-    }, options.connectTimeout)
-
-    const conn = await createAndSecureConnection(options) as Connection
+    conn.on('error', handleStartupPhaseError)
 
     conn.setTimeout(options.idleTimeout)
     conn.on('timeout', () => {
       if (connCount.value > options.minConnections) {
-        const err = Error('Closing connection as it has been idle for too long.')
-        conn.destroy(err)
-        reject(err)
+        handleStartupPhaseError(Error('Closing connection as it has been idle for too long.'))
       }
     })
 
-    conn.on('close', () => {
-      const err = Error('Connection has been closed.')
-      conn.destroy(err)
-      reject(err)
-    })
+    conn.on('close', () => handleStartupPhaseError(Error('Connection has been closed.')))
 
     conn.on('data', data => {
       const msgType = readUint8(data, 0) as BackendMessage
@@ -352,9 +344,6 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
     })
 
     let authOk = false
-
-    conn.on('data', handleStartupPhase)
-    conn.write(createStartupMessage(options.username, options.database))
 
     function handleStartupPhase(data: Buffer): void {
       const msgType = readUint8(data, 0) as BackendMessage
@@ -369,9 +358,7 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
         } else if (authRes === AuthenticationResponse.CleartextPassword) {
           conn.write(createCleartextPasswordMessage(options.password))
         } else {
-          const err = Error(`Unsupported authentication response sent by server: "${AuthenticationResponse[authRes] || authRes}".`)
-          conn.destroy(err)
-          return reject(err)
+          return handleStartupPhaseError(Error(`Unsupported authentication response sent by server: "${AuthenticationResponse[authRes] || authRes}".`))
         }
       }
       else if (msgType === BackendMessage.ParameterStatus) {
@@ -389,16 +376,12 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
           conn.preparedQueries = {}
           resolve(conn)
         } else {
-          const err = Error('Authentication could not be completed.')
-          conn.destroy(err)
-          return reject(err)
+          return handleStartupPhaseError(Error('Authentication could not be completed.'))
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
         const msg = parseErrorResponse(data).find(err => err.type === ErrorResponseType.Message)?.value || ''
-        const err = Error(`Error received from server during startup phase: "${msg}".`)
-        conn.destroy(err)
-        return reject(err)
+        return handleStartupPhaseError(Error(`Error received from server during startup phase: "${msg}".`))
       }
       else if (msgType === BackendMessage.NegotiateProtocolVersion) {
         const minorVersion = readInt32(data, 5)
@@ -411,9 +394,7 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
           offset += opt.length
         }
         const unrecognizedOptionsMsg = unrecognizedOptions.length === 0 ? '' : ` The following options were not recognized by the server: ${unrecognizedOptions.join(', ')}.`
-        const err = Error(`The Postgres server does not support protocol versions greather than 3.${minorVersion}.${unrecognizedOptionsMsg}`)
-        conn.destroy(err)
-        return reject(err)
+        return handleStartupPhaseError(Error(`The Postgres server does not support protocol versions greather than 3.${minorVersion}.${unrecognizedOptionsMsg}`))
       }
       else {
         console.warn(`[WARN] Unexpected message type sent by server during startup phase: "${BackendMessage[msgType] || msgType}".`)
@@ -647,7 +628,7 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
       if (msgType === BackendMessage.DataRow) {
         const valueCount = readInt16(data, 5)
         if (columnMetadata.length !== valueCount) {
-          conn.destroy(Error(`Received ${valueCount} column values, but ${columnMetadata.length} column descriptions.`))
+          console.warn(`[WARN] Received ${valueCount} column values, but ${columnMetadata.length} column descriptions.`)
           return
         }
 
