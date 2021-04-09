@@ -351,9 +351,10 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
       }
     })
 
-    conn.on('data', handleStartupPhase)
-
     let authOk = false
+
+    conn.on('data', handleStartupPhase)
+    conn.write(createStartupMessage(options.username, options.database))
 
     function handleStartupPhase(data: Buffer): void {
       const msgType = readUint8(data, 0) as BackendMessage
@@ -423,17 +424,16 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
         handleStartupPhase(data.slice(msgSize))
       }
     }
-
-    conn.write(createStartupMessage(options.username, options.database))
   })
 }
 
 function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'): Promise<void> {
   return new Promise((resolve, reject) => {
-    conn.on('data', handleSimpleQueryExecution)
-
     let leftover: Buffer | undefined
     let commandCompleted = false
+
+    conn.on('data', handleSimpleQueryExecution)
+    conn.write(createSimpleQueryMessage(query))
 
     function handleSimpleQueryExecution(data: Buffer): void {
       if (leftover) {
@@ -480,8 +480,6 @@ function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'
         handleSimpleQueryExecution(data.slice(msgSize))
       }
     }
-
-    conn.write(createQueryMessage(query))
   })
 }
 
@@ -493,8 +491,6 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
   }
 
   return new Promise((resolve, reject) => {
-    conn.on('data', handleQueryPreparation)
-
     const shouldFetchParamTypes = paramTypes == null
     if (shouldFetchParamTypes) {
       paramTypes = []
@@ -506,6 +502,13 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
     let columnMetadataFetched = false
 
     const columnMetadata: ColumnMetadata[] = []
+
+    conn.on('data', handleQueryPreparation)
+    conn.write(Buffer.concat([
+      createParseMessage(query, queryId, paramTypes!),
+      createDescribeMessage(queryId),
+      syncMessage
+    ]))
 
     function handleQueryPreparation(data: Buffer): void {
       if (leftover) {
@@ -581,12 +584,6 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
         handleQueryPreparation(data.slice(msgSize))
       }
     }
-
-    conn.write(Buffer.concat([
-      createParseMessage(query, queryId, paramTypes!),
-      createDescribeMessage(queryId),
-      syncMessage
-    ]))
   })
 }
 
@@ -614,8 +611,6 @@ const commandsWithRowsAffected = ['INSERT', 'DELETE', 'UPDATE', 'SELECT', 'MOVE'
 
 function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connection, query: PreparedQuery, paramValues: V): Promise<QueryResult<R>> {
   return new Promise((resolve, reject) => {
-    conn.on('data', handleQueryExecution)
-
     let leftover: Buffer | undefined
     let bindingCompleted = false
     let commandCompleted = false
@@ -623,6 +618,13 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
     const { columnMetadata } = query
     const rows: R[] = []
     let rowsAffected = 0
+
+    conn.on('data', handleQueryExecution)
+    conn.write(Buffer.concat([
+      createBindMessage(paramValues, query, ''),
+      executeUnnamedPortalMessage,
+      syncMessage
+    ]))
 
     function handleQueryExecution(data: Buffer): void {
       if (leftover) {
@@ -733,12 +735,6 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
         handleQueryExecution(data.slice(msgSize))
       }
     }
-
-    conn.write(Buffer.concat([
-      createBindMessage(paramValues, query, ''),
-      executeUnnamedPortalMessage,
-      syncMessage
-    ]))
   })
 }
 
@@ -839,7 +835,7 @@ function md5(x: string | Buffer) {
   return createHash('md5').update(x).digest('hex')
 }
 
-function createQueryMessage(query: string): Buffer {
+function createSimpleQueryMessage(query: string): Buffer {
   // 6 = 1 (message type) + 4 (message size) + 1 (query null terminator)
   const size = 6 + Buffer.byteLength(query)
   const message = Buffer.allocUnsafe(size)
