@@ -441,11 +441,13 @@ function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
+        conn.removeListener('data', handleSimpleQueryExecution)
         const msg = parseErrorResponse(data).find(err => err.type === ErrorResponseType.Message)?.value || ''
         const err = Error(`Error received from server during simple query execution phase: "${msg}".`)
         return reject(err)
       }
       else if (msgType === BackendMessage.EmptyQueryResponse) {
+        conn.removeListener('data', handleSimpleQueryExecution)
         return reject(Error('Empty query received.'))
       }
       else {
@@ -544,12 +546,14 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string, param
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
+        conn.removeListener('data', handleQueryPreparation)
         const msg = parseErrorResponse(data).find(err => err.type === ErrorResponseType.Message)?.value || ''
         const err = Error(`Error received from server during query preparation phase: "${msg}".`)
         return reject(err)
       }
+      // Messages expected for SQL queries such as "insert into" without "returning" or "create table".
       else if (msgType === BackendMessage.NoData || msgType === BackendMessage.BindComplete || msgType === BackendMessage.CommandComplete) {
-        // Messages expected for SQL queries such as "insert into" without "returning" or "create table".
+        conn.removeListener('data', handleQueryPreparation)
         const queryMetadata = { paramTypes: paramTypes!, rowMetadata: [] }
         if (queryId) preparedQueries[queryId] = queryMetadata
         return resolve(queryMetadata)
@@ -677,11 +681,13 @@ function runPreparedQuery<R extends Row>(conn: Connection, queryId: string, para
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
+        conn.removeListener('data', handleQueryExecution)
         const msg = parseErrorResponse(data).find(err => err.type === ErrorResponseType.Message)?.value || ''
         const err = Error(`Error received from server during prepared query execution phase: "${msg}".`)
         return reject(err)
       }
       else if (msgType === BackendMessage.EmptyQueryResponse) {
+        conn.removeListener('data', handleQueryExecution)
         return reject(Error('Empty query received.'))
       }
       else {
