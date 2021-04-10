@@ -564,26 +564,6 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string, param
   })
 }
 
-function cancelCurrentQuery(conn: Connection, options: PoolOptions): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const cancelConn = createTcpConnection(options.port, options.host)
-
-    cancelConn.on('connect', () => cancelConn.write(createCancelRequestMessage(conn.processId, conn.cancelKey), 'utf8', err => {
-      if (err) {
-        cancelConn.destroy(err)
-        reject(err)
-      } else {
-        resolve()
-      }
-    }))
-
-    cancelConn.on('error', err => {
-      cancelConn.destroy(err)
-      reject(err)
-    })
-  })
-}
-
 const commandsWithRowsAffected = ['INSERT', 'DELETE', 'UPDATE', 'SELECT', 'MOVE', 'FETCH', 'COPY']
 
 function runPreparedQuery<R extends Row>(conn: Connection, queryId: string, params: ColumnValue[], paramTypes: ObjectId[], rowMetadata: ColumnMetadata[]): Promise<QueryResult<R>> {
@@ -711,6 +691,26 @@ function runPreparedQuery<R extends Row>(conn: Connection, queryId: string, para
         handleQueryExecution(data.slice(msgSize))
       }
     }
+  })
+}
+
+function cancelCurrentQuery(conn: Connection, options: PoolOptions): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cancelConn = createTcpConnection(options.port, options.host)
+
+    cancelConn.on('connect', () => cancelConn.write(createCancelRequestMessage(conn.processId, conn.cancelKey), 'utf8', err => {
+      if (err) {
+        cancelConn.destroy(err)
+        reject(err)
+      } else {
+        resolve()
+      }
+    }))
+
+    cancelConn.on('error', err => {
+      cancelConn.destroy(err)
+      reject(err)
+    })
   })
 }
 
