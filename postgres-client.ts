@@ -863,65 +863,11 @@ function createSyncMessage(): Buffer {
 }
 
 function createBindMessage(queryId: string, params: ColumnValue[], paramTypes: ObjectId[], portal: string): Buffer {
-  let bufferSize
-    = 1 // Message type
-    + 4 // Message size
-    + Buffer.byteLength(portal) + 1
-    + Buffer.byteLength(queryId) + 1
-    + 2 // Number of parameter format codes
-    + 2 // Parameter format code(s)
-    + 2 // Number of parameters
-      + 4 * params.length // Length of the parameter values
-      + 0 // Values of the parameters (see below)
-    + 2 // Number of result-column format codes
-    + 2 // Result-column format code(s)
-
-  for (let i = 0; i < params.length; ++i) {
-    const v = params[i]
-    if (v == null) {
-      continue
-    }
-    switch (paramTypes[i]) {
-    case ObjectId.Bool:         bufferSize += 1 ; break
-    case ObjectId.Int2:         bufferSize += 2 ; break
-    case ObjectId.Int4:
-    case ObjectId.Float4:
-    case ObjectId.Oid:
-    case ObjectId.Regproc:      bufferSize += 4 ; break
-    case ObjectId.Int8:
-    case ObjectId.Float8:
-    case ObjectId.Timestamp:
-    case ObjectId.Timestamptz:  bufferSize += 8 ; break
-    case ObjectId.Char:
-    case ObjectId.Varchar:
-    case ObjectId.Text:
-    case ObjectId.Bpchar:
-    case ObjectId.Name:         bufferSize += Buffer.byteLength(v as string)                                                 ; break
-    // TODO Find cheaper way to calculate this (try to avoid the whole switch altogether).
-    case ObjectId.Numeric:      bufferSize += writeNumeric(Buffer.allocUnsafe(8 + 2 * (v as string).length), v as string, 0) ; break
-    case ObjectId.Bytea:        bufferSize += (v as Buffer).length                                                           ; break
-    case ObjectId.Json:         bufferSize += JSON.stringify(v).length                                                       ; break
-    case ObjectId.Jsonb:        bufferSize += 1 + JSON.stringify(v).length                                                   ; break
-    case ObjectId.CharArray:
-    case ObjectId.VarcharArray:
-    case ObjectId.TextArray:
-    case ObjectId.BpcharArray:
-    case ObjectId.NameArray:    bufferSize += 20 + byteLengthSum(v as string[]) ; break
-    case ObjectId.Int2Array:    bufferSize += 20 + (v as number[]).length * 6   ; break
-    case ObjectId.Int4Array:
-    case ObjectId.Float4Array:  bufferSize += 20 + (v as number[]).length * 8   ; break
-    case ObjectId.Int8Array:
-    case ObjectId.Float8Array:  bufferSize += 20 + (v as number[]).length * 12  ; break
-    default:
-      throw Error(`Tried binding a parameter of an unsupported type: ${ObjectId[paramTypes[i]] || paramTypes[i]}`)
-    }
-  }
-
-  const message = Buffer.allocUnsafe(bufferSize)
+  let message = Buffer.allocUnsafe(4_096)
   let offset = 0
 
   offset = writeUint8(message, FrontendMessage.Bind, offset)
-  offset = writeInt32(message, bufferSize - 1, offset)
+  offset += 4 // Message size to be placed here.
   offset = writeCString(message, portal, offset)
   offset = writeCString(message, queryId, offset)
   offset = writeInt16(message, 1, offset)
@@ -930,62 +876,67 @@ function createBindMessage(queryId: string, params: ColumnValue[], paramTypes: O
 
   for (let i = 0; i < params.length; ++i) {
     const v = params[i]
+    const priorOffset = offset
+
     if (v == null) {
       offset = writeInt32(message, -1, offset)
+    } else {
+      offset += 4
+      switch (paramTypes[i]) {
+      case ObjectId.Bool:        offset = writeUint8(message, +(v as boolean), offset) ; break
+      case ObjectId.Int2:        offset = writeInt16(message, v as number, offset)     ; break
+      case ObjectId.Int4:        offset = writeInt32(message, v as number, offset)     ; break
+      case ObjectId.Oid:
+      case ObjectId.Regproc:     offset = writeUint32(message, v as number, offset)    ; break
+      case ObjectId.Int8:        offset = writeInt64(message, v as bigint, offset)     ; break
+      case ObjectId.Float4:      offset = writeFloat32(message, v as number, offset)   ; break
+      case ObjectId.Float8:      offset = writeFloat64(message, v as number, offset)   ; break
+      case ObjectId.Timestamp:
+      case ObjectId.Timestamptz: offset = writeTimestamp(message, v as Date, offset)   ; break
+      case ObjectId.Char:
+      case ObjectId.Varchar:
+      case ObjectId.Text:
+      case ObjectId.Bpchar:
+      case ObjectId.Name:         offset = writeUtf8String(message, v as string, offset)                                 ; break
+      case ObjectId.Numeric:      offset = writeNumeric(message, v as string, offset)                                    ; break
+      case ObjectId.Bytea:        offset = writeBuffer(message, v as Buffer, offset)                                     ; break
+      case ObjectId.Json:         offset = writeUtf8String(message, JSON.stringify(v), offset)                           ; break
+      case ObjectId.Jsonb:        offset = writeUtf8String(message, String.fromCharCode(1) + JSON.stringify(v), offset)  ; break
+      case ObjectId.CharArray:    offset = writeArray(message, v as string[], offset, ObjectId.Char, writeUtf8String)    ; break
+      case ObjectId.VarcharArray: offset = writeArray(message, v as string[], offset, ObjectId.Varchar, writeUtf8String) ; break
+      case ObjectId.TextArray:    offset = writeArray(message, v as string[], offset, ObjectId.Text, writeUtf8String)    ; break
+      case ObjectId.BpcharArray:  offset = writeArray(message, v as string[], offset, ObjectId.Bpchar, writeUtf8String)  ; break
+      case ObjectId.NameArray:    offset = writeArray(message, v as string[], offset, ObjectId.Name, writeUtf8String)    ; break
+      case ObjectId.Int2Array:    offset = writeArray(message, v as number[], offset, ObjectId.Int2, writeInt16)         ; break
+      case ObjectId.Int4Array:    offset = writeArray(message, v as number[], offset, ObjectId.Int4, writeInt32)         ; break
+      case ObjectId.Int8Array:    offset = writeArray(message, v as bigint[], offset, ObjectId.Int8, writeInt64)         ; break
+      case ObjectId.Float4Array:  offset = writeArray(message, v as number[], offset, ObjectId.Float4, writeFloat32)     ; break
+      case ObjectId.Float8Array:  offset = writeArray(message, v as number[], offset, ObjectId.Float8, writeFloat64)     ; break
+      default:
+        throw Error(`Tried binding a parameter of an unsupported type: ${ObjectId[paramTypes[i]] || paramTypes[i]}`)
+      }
+      const messageSize = offset - (priorOffset + 4)
+      writeInt32(message, messageSize, priorOffset)
+    }
+
+    // 4 = bytes written after loop
+    if (4 + offset >= message.length) {
+      const priorMessage = message
+      let newSize = priorMessage.length * 2
+      while (4 + offset >= newSize) newSize *= 2
+      message = Buffer.allocUnsafe(newSize)
+      priorMessage.copy(message, 0, 0, priorOffset)
+      offset = priorOffset
+      i--
       continue
     }
-
-    let sizeOffset = offset
-    offset += 4
-
-    switch (paramTypes[i]) {
-    case ObjectId.Bool:        offset = writeUint8(message, +(v as boolean), offset) ; break
-    case ObjectId.Int2:        offset = writeInt16(message, v as number, offset)     ; break
-    case ObjectId.Int4:        offset = writeInt32(message, v as number, offset)     ; break
-    case ObjectId.Oid:
-    case ObjectId.Regproc:     offset = writeUint32(message, v as number, offset)    ; break
-    case ObjectId.Int8:        offset = writeInt64(message, v as bigint, offset)     ; break
-    case ObjectId.Float4:      offset = writeFloat32(message, v as number, offset)   ; break
-    case ObjectId.Float8:      offset = writeFloat64(message, v as number, offset)   ; break
-    case ObjectId.Timestamp:
-    case ObjectId.Timestamptz: offset = writeTimestamp(message, v as Date, offset)   ; break
-    case ObjectId.Char:
-    case ObjectId.Varchar:
-    case ObjectId.Text:
-    case ObjectId.Bpchar:
-    case ObjectId.Name:         offset = writeUtf8String(message, v as string, offset)                                 ; break
-    case ObjectId.Numeric:      offset = writeNumeric(message, v as string, offset)                                    ; break
-    case ObjectId.Bytea:        offset += (v as Buffer).copy(message, offset)                                          ; break
-    case ObjectId.Json:         offset = writeUtf8String(message, JSON.stringify(v), offset)                           ; break
-    case ObjectId.Jsonb:        offset = writeUtf8String(message, String.fromCharCode(1) + JSON.stringify(v), offset)  ; break
-    case ObjectId.CharArray:    offset = writeArray(message, v as string[], offset, ObjectId.Char, writeUtf8String)    ; break
-    case ObjectId.VarcharArray: offset = writeArray(message, v as string[], offset, ObjectId.Varchar, writeUtf8String) ; break
-    case ObjectId.TextArray:    offset = writeArray(message, v as string[], offset, ObjectId.Text, writeUtf8String)    ; break
-    case ObjectId.BpcharArray:  offset = writeArray(message, v as string[], offset, ObjectId.Bpchar, writeUtf8String)  ; break
-    case ObjectId.NameArray:    offset = writeArray(message, v as string[], offset, ObjectId.Name, writeUtf8String)    ; break
-    case ObjectId.Int2Array:    offset = writeArray(message, v as number[], offset, ObjectId.Int2, writeInt16)         ; break
-    case ObjectId.Int4Array:    offset = writeArray(message, v as number[], offset, ObjectId.Int4, writeInt32)         ; break
-    case ObjectId.Int8Array:    offset = writeArray(message, v as bigint[], offset, ObjectId.Int8, writeInt64)         ; break
-    case ObjectId.Float4Array:  offset = writeArray(message, v as number[], offset, ObjectId.Float4, writeFloat32)     ; break
-    case ObjectId.Float8Array:  offset = writeArray(message, v as number[], offset, ObjectId.Float8, writeFloat64)     ; break
-    default:
-      throw Error(`Tried binding a parameter of an unsupported type: ${ObjectId[paramTypes[i]] || paramTypes[i]}`)
-    }
-
-    writeInt32(message, offset - (sizeOffset + 4), sizeOffset)
   }
 
   offset = writeInt16(message, 1, offset)
   offset = writeInt16(message, WireFormat.Binary, offset)
 
-  return message
-}
-
-function byteLengthSum(arr: string[]): number {
-  for (var s = 0, i = 0; i < arr.length; ++i) {
-    s += Buffer.byteLength(arr[i])
-  }
-  return s
+  writeInt32(message, offset - 1, 1)
+  return message.slice(0, offset)
 }
 
 const executeUnnamedPortalMessage = createExecuteMessage('')
@@ -1399,6 +1350,11 @@ function writeCString(buffer: Buffer, value: string, offset: number): number {
   offset += buffer.write(value, offset, 'ascii')
   buffer[offset++] = 0
   return offset
+}
+
+function writeBuffer(buffer: Buffer, value: Buffer, offset: number): number {
+  value.copy(buffer, offset)
+  return offset + value.length
 }
 
 function readArray<T>(buffer: Buffer, readElem: (buffer: Buffer, offset: number, size: number) => T): T[] {
