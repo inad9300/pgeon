@@ -481,7 +481,7 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string, param
     conn.on('data', handleQueryPreparation)
     conn.write(Buffer.concat([
       createParseMessage(querySql, queryId, paramTypes!),
-      createDescribeMessage(queryId),
+      createDescribeMessage(DescribeOrCloseRequest.PreparedStatement, queryId),
       syncMessage
     ]))
 
@@ -840,14 +840,14 @@ function createParseMessage(querySql: string, queryId: string, paramTypes: Objec
   return message
 }
 
-function createDescribeMessage(queryId: string): Buffer {
+function createDescribeMessage(type: DescribeOrCloseRequest, id: string): Buffer {
   // 7 = 1 (message type) + 4 (message size) + 1 (describe message type) + 1 (queryId null terminator)
-  const size = 7 + Buffer.byteLength(queryId)
+  const size = 7 + Buffer.byteLength(id)
   const message = Buffer.allocUnsafe(size)
   writeUint8(message, FrontendMessage.Describe, 0)
   writeInt32(message, size - 1, 1)
-  writeUint8(message, DescribeOrCloseRequest.PreparedStatement, 5)
-  writeCString(message, queryId, 6)
+  writeUint8(message, type, 5)
+  writeCString(message, id, 6)
   return message
 }
 
