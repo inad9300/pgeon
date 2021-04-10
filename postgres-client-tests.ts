@@ -46,11 +46,12 @@ tests[t++] = (async () => {
   await pool.run(sql`create table things (name char(1) primary key)`)
   await countEq(pool, 0)
 
-  await pool.run(sql`insert into things (name) values ('a')`)
+  const res = await pool.run(sql`insert into things (name) values ('a') returning *`)
   await countEq(pool, 1)
+  eq(res.rows[0].name, 'a')
 
   await pool.transaction(async tx => {
-    await tx.run(sql`insert into things (name) values ('b')`)
+    await tx.run(sql`insert into things (name) values (${'b'})`)
     await countEq(tx, 2)
   })
   await countEq(pool, 2)

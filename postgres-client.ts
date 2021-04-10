@@ -549,7 +549,8 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string, param
         return reject(err)
       }
       else if (msgType === BackendMessage.NoData || msgType === BackendMessage.BindComplete || msgType === BackendMessage.CommandComplete) {
-        const queryMetadata = { paramTypes: [], rowMetadata: [] }
+        // Messages expected for SQL queries such as "insert into" without "returning" or "create table".
+        const queryMetadata = { paramTypes: paramTypes!, rowMetadata: [] }
         if (queryId) preparedQueries[queryId] = queryMetadata
         return resolve(queryMetadata)
       }
