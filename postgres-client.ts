@@ -705,19 +705,22 @@ function cancelCurrentQuery(conn: Connection, options: PoolOptions): Promise<voi
   return new Promise((resolve, reject) => {
     const cancelConn = createTcpConnection(options.port, options.host)
 
-    cancelConn.on('connect', () => cancelConn.write(createCancelRequestMessage(conn.processId, conn.cancelKey), 'utf8', err => {
-      if (err) {
-        cancelConn.destroy(err)
-        reject(err)
-      } else {
-        resolve()
-      }
-    }))
-
-    cancelConn.on('error', err => {
-      cancelConn.destroy(err)
+    cancelConn.once('error', err => {
       reject(err)
+      cancelConn.destroy(err)
     })
+
+    cancelConn.once('connect', () =>
+      cancelConn.write(createCancelRequestMessage(conn.processId, conn.cancelKey), 'utf8', err => {
+        if (err) {
+          reject(err)
+          cancelConn.destroy(err)
+        } else {
+          // An error may still be emitted, see https://nodejs.org/api/stream.html#stream_writable_write_chunk_encoding_callback
+          setTimeout(() => resolve())
+        }
+      })
+    )
   })
 }
 
