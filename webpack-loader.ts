@@ -1,4 +1,4 @@
-import { newPool, getTypeScriptType, QueryMetadata, Row } from './postgres-client'
+import { newPool, getTypeScriptType, QueryMetadata, Row, sql } from './postgres-client'
 import type { Compiler } from 'webpack'
 
 const pool = newPool()
@@ -18,7 +18,7 @@ export default function pgeonLoader(this: any, source: string) {
 }
 
 async function getSourceWithQueryTypes(source: string): Promise<string> {
-  const matches = [...source.matchAll(/\brunStaticQuery(<[^>]+?>)?`((?:\\.|[^`\\])*?)`/g)]
+  const matches = [...source.matchAll(/\bsql(<[^>]+?>)?`((?:\\.|[^`\\])*?)`/g)]
   if (matches.length === 0) {
     return Promise.resolve(source)
   }
@@ -40,7 +40,7 @@ async function getSourceWithQueryTypes(source: string): Promise<string> {
     })
 
   for await (const { type, match } of promises) {
-    const start = match.index! + 'runStaticQuery'.length
+    const start = match.index! + 'sql'.length
     source = source.slice(0, start) + type + source.slice(start + (match[1]?.length || 0))
   }
 
@@ -54,27 +54,27 @@ async function getQueryType(query: string): Promise<string> {
   return `<${rowType}, ${paramsType}>`
 }
 
-async function getRowType({ columnMetadata }: QueryMetadata): Promise<string> {
-  const tableIds = columnMetadata.map(col => col.tableId).filter(x => !!x) as number[]
-  const colPositions = columnMetadata.map(col => col.positionInTable).filter(x => !!x) as number[]
+async function getRowType({ rowMetadata }: QueryMetadata): Promise<string> {
+  const tableIds = rowMetadata.map(col => col.tableId).filter(x => !!x) as number[]
+  const colPositions = rowMetadata.map(col => col.positionInTable).filter(x => !!x) as number[]
 
   const colNullability: Row[] = []
-  if (tableIds.length > 0 && columnMetadata.length > 0) {
+  if (tableIds.length > 0 && rowMetadata.length > 0) {
     colNullability.push(
       ...(
-        await pool.runStaticQuery`
+        await pool.run(sql`
           select cls.oid, col.ordinal_position, col.is_nullable
           from information_schema.columns col
           join pg_catalog.pg_class cls on (cls.relname = col.table_name)
           where cls.oid = any(${tableIds}::int[])
           and col.ordinal_position = any(${colPositions})
-        `
+        `)
       ).rows
     )
   }
 
   const colTypes: string[] = []
-  for (const col of columnMetadata) {
+  for (const col of rowMetadata) {
     const colName = /^[_a-zA-Z][_a-zA-Z0-9]*$/.test(col.name) ? col.name : `'${col.name}'`
     let colType = `${colName}: ${getTypeScriptType(col.type)}`
     if (col.tableId) {

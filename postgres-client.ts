@@ -23,10 +23,31 @@ export interface PoolOptions {
   idleTimeout: number
 }
 
+export interface Client {
+  run<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(query: Query<P, R>): CancellablePromise<QueryResult<R>>
+}
+
+export interface Pool extends Client {
+  getQueryMetadata(query: string): Promise<QueryMetadata>
+  transaction(callback: (client: Client) => Promise<void>): Promise<void>
+  destroy(): void
+}
+
+export interface Query<P extends ColumnValue[], _R extends Row = Row> {
+  sql: string
+  params?: P
+  paramTypes?: ObjectId[]
+  id?: string
+}
+
 export interface QueryResult<R extends Row> {
   rows: R[]
   rowsAffected: number
-  columnMetadata: ColumnMetadata[]
+}
+
+export interface QueryMetadata {
+  paramTypes: ObjectId[]
+  rowMetadata: ColumnMetadata[]
 }
 
 export type Row = {
@@ -42,11 +63,6 @@ export interface ColumnMetadata {
   positionInTable?: number
 }
 
-export interface QueryMetadata {
-  paramTypes: ObjectId[]
-  columnMetadata: ColumnMetadata[]
-}
-
 export interface CancellablePromise<T> extends Promise<T> {
   cancel(): void
 }
@@ -58,26 +74,43 @@ export class QueryCancelledError extends Error {
   }
 }
 
-export interface Client {
-  runStaticQuery<R extends Row = Row, V extends ColumnValue[] = ColumnValue[]>(queryParts: TemplateStringsArray, ...values: V): CancellablePromise<QueryResult<R>>
-  runDynamicQuery<R extends Row = Row, V extends ColumnValue[] = ColumnValue[]>(query: string, values?: V): CancellablePromise<QueryResult<R>>
-}
+export function sql<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(queryTextParts: TemplateStringsArray, ...params: P): Query<P, R> {
+  const lastIdx = params.length
+  const uniqueParams = [] as any[] as P
+  const argIndices: number[] = []
 
-export interface Pool extends Client {
-  getQueryMetadata(query: string): Promise<QueryMetadata>
-  transaction(callback: (client: Client) => Promise<void>): Promise<void>
-  destroy(): void
-}
+  out:
+  for (let i = 0; i < lastIdx; ++i) {
+    const val = params[i]
+    const argIdx = uniqueParams.length
+    for (let j = 0; j < argIdx; ++j) {
+      if (val === uniqueParams[j]) {
+        argIndices.push(j + 1)
+        continue out
+      }
+    }
+    argIndices.push(argIdx + 1)
+    uniqueParams.push(val)
+  }
 
-interface PreparedQuery extends QueryMetadata {
-  queryId: string
+  let queryText = ''
+  for (let i = 0; i < lastIdx; ++i) {
+    queryText += queryTextParts[i] + '$' + argIndices[i]
+  }
+  queryText += queryTextParts[lastIdx]
+
+  return {
+    sql: queryText,
+    params: uniqueParams,
+    id: md5(queryText)
+  }
 }
 
 interface Connection extends Socket {
   processId: number
   cancelKey: number
   preparedQueries: {
-    [queryId: string]: PreparedQuery
+    [queryId: string]: QueryMetadata
   }
 }
 
@@ -170,18 +203,18 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
     return resultPromise
   }
 
-  function prepareAndRunQuery<R extends Row = Row, V extends ColumnValue[] = ColumnValue[]>(conn: Connection, query: string, values: V = [] as any[] as V): CancellablePromise<QueryResult<R>> {
+  function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(conn: Connection, query: Query<P, R>): CancellablePromise<QueryResult<R>> {
     let cancelled = false
     let cancelledPromise: Promise<void>
 
     const queryTimeoutId = setTimeout(() => resultPromise.cancel(), options.queryTimeout)
 
-    const resultPromise = prepareQuery(conn, query)
+    const resultPromise = prepareQuery(conn, query.id || '', query.sql, query.paramTypes)
       .then(preparedQuery => {
         if (cancelled) {
           throw new QueryCancelledError('Query cancelled before query execution phase.')
         }
-        return runPreparedQuery<R, V>(conn, preparedQuery, values)
+        return runPreparedQuery<R>(conn, query.id || '', query.params || [], preparedQuery.paramTypes, preparedQuery.rowMetadata)
           .then(res => {
             if (cancelled) {
               throw new QueryCancelledError('Query cancelled after query execution phase.')
@@ -217,59 +250,21 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
     return resultPromise
   }
 
-  function glueStaticQueryAndGetUniqueValues<V extends ColumnValue[] = ColumnValue[]>(queryParts: TemplateStringsArray, values: V) {
-    const lastIdx = values.length
-    const uniqueValues = [] as any[] as V
-    const argIndices: number[] = []
-
-    out:
-    for (let i = 0; i < lastIdx; ++i) {
-      const val = values[i]
-      const argIdx = uniqueValues.length
-      for (let j = 0; j < argIdx; ++j) {
-        if (val === uniqueValues[j]) {
-          argIndices.push(j + 1)
-          continue out
-        }
-      }
-      argIndices.push(argIdx + 1)
-      uniqueValues.push(val)
-    }
-
-    let query = ''
-    for (let i = 0; i < lastIdx; ++i) {
-      query += queryParts[i] + '$' + argIndices[i]
-    }
-    query += queryParts[lastIdx]
-
-    return { query, uniqueValues }
-  }
-
   return {
-    runStaticQuery<R extends Row = Row, V extends ColumnValue[] = ColumnValue[]>(queryParts: TemplateStringsArray, ...values: V): CancellablePromise<QueryResult<R>> {
-      const { query, uniqueValues } = glueStaticQueryAndGetUniqueValues(queryParts, values)
-      return withConnection(conn => prepareAndRunQuery<R, V>(conn, query, uniqueValues))
+    run<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(query: Query<P, R>): CancellablePromise<QueryResult<R>> {
+      return withConnection(conn => prepareAndRunQuery(conn, query))
     },
-    runDynamicQuery<R extends Row = Row, V extends ColumnValue[] = ColumnValue[]>(query: string, values: V = [] as any[] as V): CancellablePromise<QueryResult<R>> {
-      return withConnection(conn => prepareAndRunQuery(conn, query, values))
-    },
-    getQueryMetadata(query: string): Promise<QueryMetadata> {
-      return withConnection(conn => prepareQuery(conn, query))
+    getQueryMetadata(querySql: string): Promise<QueryMetadata> {
+      return withConnection(conn => prepareQuery(conn, '', querySql, undefined))
     },
     transaction(callback: (client: Client) => Promise<void>): Promise<void> {
       return withConnection(async conn => {
-        const client = {
-          runStaticQuery<R extends Row = Row, V extends ColumnValue[] = ColumnValue[]>(queryParts: TemplateStringsArray, ...values: V): CancellablePromise<QueryResult<R>> {
-            const { query, uniqueValues } = glueStaticQueryAndGetUniqueValues(queryParts, values)
-            return prepareAndRunQuery(conn, query, uniqueValues)
-          },
-          runDynamicQuery<R extends Row = Row, V extends ColumnValue[] = ColumnValue[]>(query: string, values: V = [] as any[] as V): CancellablePromise<QueryResult<R>> {
-            return prepareAndRunQuery(conn, query, values)
-          }
+        function run<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(query: Query<P, R>): CancellablePromise<QueryResult<R>> {
+          return prepareAndRunQuery(conn, query)
         }
 
         await runSimpleQuery(conn, 'begin')
-        return callback(client)
+        return callback({ run })
           .then(() => runSimpleQuery(conn, 'commit'))
           .catch(async err => {
             await runSimpleQuery(conn, 'rollback')
@@ -464,15 +459,14 @@ function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'
   })
 }
 
-function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]): Promise<PreparedQuery> {
+function prepareQuery(conn: Connection, queryId: string, querySql: string, paramTypes: ObjectId[] | undefined): Promise<QueryMetadata> {
   const { preparedQueries } = conn
-  const queryId = md5(query)
-  if (preparedQueries[queryId]) {
+  if (queryId && preparedQueries[queryId]) {
     return Promise.resolve(preparedQueries[queryId])
   }
 
   return new Promise((resolve, reject) => {
-    const shouldFetchParamTypes = paramTypes == null
+    const shouldFetchParamTypes = paramTypes === undefined
     if (shouldFetchParamTypes) {
       paramTypes = []
     }
@@ -480,13 +474,13 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
     let leftover: Buffer | undefined
     let parseCompleted = false
     let paramTypesFetched = false
-    let columnMetadataFetched = false
+    let rowMetadataFetched = false
 
-    const columnMetadata: ColumnMetadata[] = []
+    const rowMetadata: ColumnMetadata[] = []
 
     conn.on('data', handleQueryPreparation)
     conn.write(Buffer.concat([
-      createParseMessage(query, queryId, paramTypes!),
+      createParseMessage(querySql, queryId, paramTypes!),
       createDescribeMessage(queryId),
       syncMessage
     ]))
@@ -521,8 +515,8 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
             offset += 4
             paramTypes!.push(paramType)
           }
+          paramTypesFetched = true
         }
-        paramTypesFetched = true
       }
       else if (msgType === BackendMessage.RowDescription) {
         const colCount = readInt16(data, 5)
@@ -535,15 +529,16 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
           /* const typeSize        = readInt16(data, offset)               ; */ offset += 2
           /* const typeModifier    = readInt32(data, offset)               ; */ offset += 4
           /* const format          = readInt16(data, offset) as WireFormat ; */ offset += 2
-          columnMetadata.push({ name, type, tableId, positionInTable })
+          rowMetadata.push({ name, type, tableId, positionInTable })
         }
-        columnMetadataFetched = true
+        rowMetadataFetched = true
       }
       else if (msgType === BackendMessage.ReadyForQuery) {
         conn.removeListener('data', handleQueryPreparation)
-        if (parseCompleted && paramTypesFetched && columnMetadataFetched) {
-          preparedQueries[queryId] = { queryId, paramTypes: paramTypes!, columnMetadata }
-          return resolve(preparedQueries[queryId])
+        if (parseCompleted && (!shouldFetchParamTypes || paramTypesFetched) && rowMetadataFetched) {
+          const queryMetadata = { paramTypes: paramTypes!, rowMetadata }
+          if (queryId) preparedQueries[queryId] = queryMetadata
+          return resolve(queryMetadata)
         } else {
           return reject(Error('Failed to parse query.'))
         }
@@ -554,8 +549,9 @@ function prepareQuery(conn: Connection, query: string, paramTypes?: ObjectId[]):
         return reject(err)
       }
       else if (msgType === BackendMessage.NoData || msgType === BackendMessage.BindComplete || msgType === BackendMessage.CommandComplete) {
-        preparedQueries[queryId] = { queryId, paramTypes: [], columnMetadata: [] }
-        return resolve(preparedQueries[queryId])
+        const queryMetadata = { paramTypes: [], rowMetadata: [] }
+        if (queryId) preparedQueries[queryId] = queryMetadata
+        return resolve(queryMetadata)
       }
       else {
         console.warn('[WARN] Unexpected message received during query preparation phase: ' + (BackendMessage[msgType] || msgType))
@@ -590,19 +586,18 @@ function cancelCurrentQuery(conn: Connection, options: PoolOptions): Promise<voi
 
 const commandsWithRowsAffected = ['INSERT', 'DELETE', 'UPDATE', 'SELECT', 'MOVE', 'FETCH', 'COPY']
 
-function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connection, query: PreparedQuery, paramValues: V): Promise<QueryResult<R>> {
+function runPreparedQuery<R extends Row>(conn: Connection, queryId: string, params: ColumnValue[], paramTypes: ObjectId[], rowMetadata: ColumnMetadata[]): Promise<QueryResult<R>> {
   return new Promise((resolve, reject) => {
     let leftover: Buffer | undefined
     let bindingCompleted = false
     let commandCompleted = false
 
-    const { columnMetadata } = query
     const rows: R[] = []
     let rowsAffected = 0
 
     conn.on('data', handleQueryExecution)
     conn.write(Buffer.concat([
-      createBindMessage(paramValues, query, ''),
+      createBindMessage(queryId, params, paramTypes, ''),
       executeUnnamedPortalMessage,
       syncMessage
     ]))
@@ -626,16 +621,16 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
 
       const msgType = readUint8(data, 0) as BackendMessage
       if (msgType === BackendMessage.DataRow) {
-        const valueCount = readInt16(data, 5)
-        if (columnMetadata.length !== valueCount) {
-          console.warn(`[WARN] Received ${valueCount} column values, but ${columnMetadata.length} column descriptions.`)
+        const paramCount = readInt16(data, 5)
+        if (rowMetadata.length !== paramCount) {
+          console.warn(`[WARN] Received ${paramCount} query parameters, but ${rowMetadata.length} column descriptions.`)
           return
         }
 
         const row: Row = {}
         let offset = 7
-        for (let i = 0; i < valueCount; ++i) {
-          const column = columnMetadata[i]
+        for (let i = 0; i < paramCount; ++i) {
+          const column = rowMetadata[i]
           const valueSize = readInt32(data, offset)
           offset += 4
           if (valueSize === -1) {
@@ -695,7 +690,7 @@ function runPreparedQuery<R extends Row, V extends ColumnValue[]>(conn: Connecti
         // const txStatus = readUint8(data, 5) as TransactionStatus
         conn.removeListener('data', handleQueryExecution)
         if (bindingCompleted && commandCompleted) {
-          return resolve({ rows, rowsAffected, columnMetadata })
+          return resolve({ rows, rowsAffected })
         } else {
           return reject(Error('Failed to execute prepared query.'))
         }
@@ -816,26 +811,26 @@ function md5(x: string | Buffer) {
   return createHash('md5').update(x).digest('hex')
 }
 
-function createSimpleQueryMessage(query: string): Buffer {
+function createSimpleQueryMessage(querySql: string): Buffer {
   // 6 = 1 (message type) + 4 (message size) + 1 (query null terminator)
-  const size = 6 + Buffer.byteLength(query)
+  const size = 6 + Buffer.byteLength(querySql)
   const message = Buffer.allocUnsafe(size)
   writeUint8(message, FrontendMessage.Query, 0)
   writeInt32(message, size - 1, 1)
-  writeCString(message, query, 5)
+  writeCString(message, querySql, 5)
   return message
 }
 
-function createParseMessage(query: string, queryId: string, paramTypes: ObjectId[]): Buffer {
+function createParseMessage(querySql: string, queryId: string, paramTypes: ObjectId[]): Buffer {
   // 9 = 1 (message type) + 4 (message size) + 1 (queryId null terminator) + 1 (query null terminator) + 2 (number of parameter data)
-  const size = 9 + Buffer.byteLength(queryId) + Buffer.byteLength(query) + paramTypes.length * 4
+  const size = 9 + Buffer.byteLength(queryId) + Buffer.byteLength(querySql) + paramTypes.length * 4
   const message = Buffer.allocUnsafe(size)
   let offset = 0
 
   offset = writeUint8(message, FrontendMessage.Parse, offset)
   offset = writeInt32(message, size - 1, offset)
   offset = writeCString(message, queryId, offset)
-  offset = writeCString(message, query, offset)
+  offset = writeCString(message, querySql, offset)
   offset = writeInt16(message, paramTypes.length, offset)
 
   for (const t of paramTypes) {
@@ -867,9 +862,7 @@ function createSyncMessage(): Buffer {
   return message
 }
 
-function createBindMessage(paramValues: any[], query: PreparedQuery, portal: string): Buffer {
-  const { queryId, paramTypes } = query
-
+function createBindMessage(queryId: string, params: ColumnValue[], paramTypes: ObjectId[], portal: string): Buffer {
   let bufferSize
     = 1 // Message type
     + 4 // Message size
@@ -877,14 +870,14 @@ function createBindMessage(paramValues: any[], query: PreparedQuery, portal: str
     + Buffer.byteLength(queryId) + 1
     + 2 // Number of parameter format codes
     + 2 // Parameter format code(s)
-    + 2 // Number of parameter values
-      + 4 * paramValues.length // Length of the parameter values
+    + 2 // Number of parameters
+      + 4 * params.length // Length of the parameter values
       + 0 // Values of the parameters (see below)
     + 2 // Number of result-column format codes
     + 2 // Result-column format code(s)
 
-  for (let i = 0; i < paramValues.length; ++i) {
-    const v = paramValues[i]
+  for (let i = 0; i < params.length; ++i) {
+    const v = params[i]
     if (v == null) {
       continue
     }
@@ -933,10 +926,10 @@ function createBindMessage(paramValues: any[], query: PreparedQuery, portal: str
   offset = writeCString(message, queryId, offset)
   offset = writeInt16(message, 1, offset)
   offset = writeInt16(message, WireFormat.Binary, offset)
-  offset = writeInt16(message, paramValues.length, offset)
+  offset = writeInt16(message, params.length, offset)
 
-  for (let i = 0; i < paramValues.length; ++i) {
-    const v = paramValues[i]
+  for (let i = 0; i < params.length; ++i) {
+    const v = params[i]
     if (v == null) {
       offset = writeInt32(message, -1, offset)
       continue

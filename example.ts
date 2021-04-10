@@ -1,14 +1,13 @@
-import { newPool } from './postgres-client'
+import { newPool, sql } from './postgres-client'
 
 const pool = newPool()
-
 const limit = 2
 
-pool.runStaticQuery`
+pool.run(sql`
   select oid
   from pg_catalog.pg_class
   limit ${limit}::int4
-`
+`)
 .then(res => {
   console.debug('Query result:', res)
 
