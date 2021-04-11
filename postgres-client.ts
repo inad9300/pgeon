@@ -254,17 +254,20 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   }
 
   function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(conn: Connection, query: Query<R, P>): CancellablePromise<QueryResult<R>> {
+    query.id = query.id || ''
+    query.params = query.params || []
+
     let cancelled = false
     let cancelledPromise: Promise<void>
 
     const queryTimeoutId = setTimeout(() => resultPromise.cancel(), options.queryTimeout)
 
-    const resultPromise = prepareQuery(conn, query.id || '', query.sql, true)
+    const resultPromise = prepareQuery(conn, query.id, query.sql)
       .then(preparedQuery => {
         if (cancelled) {
           throw new QueryCancelledError('Query cancelled before query execution phase.')
         }
-        return runPreparedQuery<R>(conn, query.id || '', query.params || [], preparedQuery.paramTypes, preparedQuery.rowMetadata)
+        return runPreparedQuery<R>(conn, { ...query, metadata: preparedQuery })
           .then(queryResult => {
             if (cancelled) {
               throw new QueryCancelledError('Query cancelled after query execution phase.')
@@ -305,7 +308,7 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       return withConnection(conn => prepareAndRunQuery(conn, query))
     },
     getQueryMetadata(querySql: string): Promise<QueryMetadata> {
-      return withConnection(conn => prepareQuery(conn, '', querySql, true))
+      return withConnection(conn => prepareQuery(conn, '', querySql))
     },
     transaction(callback: (client: Client) => Promise<void>): Promise<void> {
       return withConnection(async conn => {
@@ -416,7 +419,7 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
       else if (msgType === BackendMessage.ReadyForQuery) {
         if (authOk) {
           clearTimeout(connectTimeoutId)
-          conn.removeListener('data', handleStartupPhase)
+          conn.off('data', handleStartupPhase)
           conn.preparedQueries = {}
           resolve(conn)
         } else {
@@ -453,35 +456,18 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
 
 function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'): Promise<void> {
   return new Promise((resolve, reject) => {
-    let leftover: Buffer | undefined
     let commandCompleted = false
 
-    conn.on('data', handleSimpleQueryExecution)
+    const off = onConnectionData(conn, handleSimpleQueryExecution)
     conn.write(createSimpleQueryMessage(query))
 
     function handleSimpleQueryExecution(data: Buffer): void {
-      if (leftover) {
-        data = Buffer.concat([leftover, data])
-        leftover = undefined
-      }
-
-      if (data.byteLength <= 5) {
-        leftover = data
-        return
-      }
-
-      const msgSize = 1 + readInt32(data, 1)
-      if (msgSize > data.byteLength) {
-        leftover = data
-        return
-      }
-
       const msgType = readUint8(data, 0) as BackendMessage
       if (msgType === BackendMessage.CommandComplete) {
         commandCompleted = true
       }
       else if (msgType === BackendMessage.ReadyForQuery) {
-        conn.removeListener('data', handleSimpleQueryExecution)
+        off()
         if (commandCompleted) {
           return resolve()
         } else {
@@ -489,34 +475,27 @@ function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
-        conn.removeListener('data', handleSimpleQueryExecution)
+        off()
         return reject(new PostgresError(data))
       }
       else if (msgType === BackendMessage.EmptyQueryResponse) {
-        conn.removeListener('data', handleSimpleQueryExecution)
+        off()
         return reject(Error('Empty query received.'))
       }
       else {
         console.warn(`[WARN] Unexpected message received during simple query execution phase: ${BackendMessage[msgType] || msgType}.`)
       }
-
-      if (data.byteLength > msgSize) {
-        handleSimpleQueryExecution(data.slice(msgSize))
-      }
     }
   })
 }
 
-function prepareQuery(conn: Connection, queryId: string, querySql: string, shouldFetchMetadata: true): Promise<QueryMetadata>
-function prepareQuery(conn: Connection, queryId: string, querySql: string, shouldFetchMetadata: boolean): Promise<QueryMetadata | undefined>
-function prepareQuery(conn: Connection, queryId: string, querySql: string, shouldFetchMetadata: boolean): Promise<QueryMetadata | undefined> {
+function prepareQuery(conn: Connection, queryId: string, querySql: string): Promise<QueryMetadata> {
   const { preparedQueries } = conn
   if (queryId && preparedQueries[queryId]) {
     return Promise.resolve(preparedQueries[queryId])
   }
 
   return new Promise((resolve, reject) => {
-    let leftover: Buffer | undefined
     let parseCompleted = false
     let paramTypesFetched = false
     let rowMetadataFetched = false
@@ -524,32 +503,14 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string, shoul
     const paramTypes: ObjectId[] = []
     const rowMetadata: ColumnMetadata[] = []
 
-    conn.on('data', handleQueryPreparation)
+    const off = onConnectionData(conn, handleQueryPreparation)
     conn.write(Buffer.concat([
       createParseMessage(querySql, queryId, []),
-      shouldFetchMetadata
-        ? createDescribeMessage(DescribeType.PreparedStatement, queryId)
-        : Buffer.of(),
+      createDescribeMessage(DescribeType.PreparedStatement, queryId),
       syncMessage
     ]))
 
     function handleQueryPreparation(data: Buffer): void {
-      if (leftover) {
-        data = Buffer.concat([leftover, data])
-        leftover = undefined
-      }
-
-      if (data.byteLength <= 5) {
-        leftover = data
-        return
-      }
-
-      const msgSize = 1 + readInt32(data, 1)
-      if (msgSize > data.byteLength) {
-        leftover = data
-        return
-      }
-
       const msgType = readUint8(data, 0) as BackendMessage
       if (msgType === BackendMessage.ParseComplete) {
         parseCompleted = true
@@ -581,31 +542,23 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string, shoul
       }
       // "NoData" is expected for SQL queries without return value, e.g. DDL statements.
       else if (msgType === BackendMessage.ReadyForQuery || msgType === BackendMessage.NoData) {
-        conn.removeListener('data', handleQueryPreparation)
-        if (parseCompleted && (!shouldFetchMetadata || (paramTypesFetched && (rowMetadataFetched || msgType === BackendMessage.NoData)))) {
-          if (shouldFetchMetadata) {
-            const queryMetadata = { paramTypes, rowMetadata }
-            if (queryId) {
-              preparedQueries[queryId] = queryMetadata
-            }
-            return resolve(queryMetadata)
-          } else {
-            return resolve(undefined)
+        off()
+        if (parseCompleted && (paramTypesFetched && (rowMetadataFetched || msgType === BackendMessage.NoData))) {
+          const queryMetadata = { paramTypes, rowMetadata }
+          if (queryId) {
+            preparedQueries[queryId] = queryMetadata
           }
+          return resolve(queryMetadata)
         } else {
           return reject(Error('Failed to parse query.'))
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
-        conn.removeListener('data', handleQueryPreparation)
+        off()
         return reject(new PostgresError(data))
       }
       else {
         console.warn('[WARN] Unexpected message received during query preparation phase: ' + (BackendMessage[msgType] || msgType))
-      }
-
-      if (data.byteLength > msgSize) {
-        handleQueryPreparation(data.slice(msgSize))
       }
     }
   })
@@ -613,51 +566,34 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string, shoul
 
 const commandsWithRowsAffected = ['INSERT', 'DELETE', 'UPDATE', 'SELECT', 'MOVE', 'FETCH', 'COPY']
 
-function runPreparedQuery<R extends Row>(conn: Connection, queryId: string, params: ColumnValue[], paramTypes: ObjectId[], rowMetadata: ColumnMetadata[]): Promise<QueryResult<R>> {
+function runPreparedQuery<R extends Row>(conn: Connection, query: Query): Promise<QueryResult<R>> {
   return new Promise((resolve, reject) => {
-    let leftover: Buffer | undefined
     let bindingCompleted = false
     let commandCompleted = false
 
     const rows: R[] = []
     let rowsAffected = 0
 
-    conn.on('data', handleQueryExecution)
+    const off = onConnectionData(conn, handleQueryExecution)
     conn.write(Buffer.concat([
-      createBindMessage(queryId, params, paramTypes, ''),
+      createBindMessage(query.id!, query.params!, query.metadata!.paramTypes, ''),
       executeUnnamedPortalMessage,
       syncMessage
     ]))
 
     function handleQueryExecution(data: Buffer): void {
-      if (leftover) {
-        data = Buffer.concat([leftover, data])
-        leftover = undefined
-      }
-
-      if (data.byteLength <= 5) {
-        leftover = data
-        return
-      }
-
-      const msgSize = 1 + readInt32(data, 1)
-      if (msgSize > data.byteLength) {
-        leftover = data
-        return
-      }
-
       const msgType = readUint8(data, 0) as BackendMessage
       if (msgType === BackendMessage.DataRow) {
         const paramCount = readInt16(data, 5)
-        if (rowMetadata.length !== paramCount) {
-          console.warn(`[WARN] Received ${paramCount} query parameters, but ${rowMetadata.length} column descriptions.`)
+        if (query.metadata!.rowMetadata.length !== paramCount) {
+          console.warn(`[WARN] Received ${paramCount} query parameters, but ${query.metadata!.rowMetadata.length} column descriptions.`)
           return
         }
 
         const row: Row = {}
         let offset = 7
         for (let i = 0; i < paramCount; ++i) {
-          const column = rowMetadata[i]
+          const column = query.metadata!.rowMetadata[i]
           const valueSize = readInt32(data, offset)
           offset += 4
           if (valueSize === -1) {
@@ -715,7 +651,7 @@ function runPreparedQuery<R extends Row>(conn: Connection, queryId: string, para
       }
       else if (msgType === BackendMessage.ReadyForQuery) {
         // const txStatus = readUint8(data, 5) as TransactionStatus
-        conn.removeListener('data', handleQueryExecution)
+        off()
         if (bindingCompleted && commandCompleted) {
           return resolve({ rows, rowsAffected })
         } else {
@@ -723,19 +659,15 @@ function runPreparedQuery<R extends Row>(conn: Connection, queryId: string, para
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
-        conn.removeListener('data', handleQueryExecution)
+        off()
         return reject(new PostgresError(data))
       }
       else if (msgType === BackendMessage.EmptyQueryResponse) {
-        conn.removeListener('data', handleQueryExecution)
+        off()
         return reject(Error('Empty query received.'))
       }
       else {
         console.warn(`[WARN] Unexpected message received during prepared query execution phase: ${BackendMessage[msgType] || msgType}.`)
-      }
-
-      if (data.byteLength > msgSize) {
-        handleQueryExecution(data.slice(msgSize))
       }
     }
   })
@@ -762,6 +694,38 @@ function cancelCurrentQuery(conn: Connection, options: PoolOptions): Promise<voi
       })
     )
   })
+}
+
+function onConnectionData(conn: Connection, callback: (data: Buffer) => void) {
+  conn.on('data', dataHandler)
+
+  let leftover: Buffer | undefined
+
+  function dataHandler(data: Buffer) {
+    if (leftover) {
+      data = Buffer.concat([leftover, data])
+      leftover = undefined
+    }
+
+    if (data.byteLength <= 5) {
+      leftover = data
+      return
+    }
+
+    const msgSize = 1 + readInt32(data, 1)
+    if (msgSize > data.byteLength) {
+      leftover = data
+      return
+    }
+
+    callback(data)
+
+    if (data.byteLength > msgSize) {
+      dataHandler(data.slice(msgSize))
+    }
+  }
+
+  return () => conn.off('data', dataHandler)
 }
 
 const sslRequestMessage = createSslRequestMessage()
