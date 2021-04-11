@@ -526,7 +526,7 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string, shoul
 
     conn.on('data', handleQueryPreparation)
     conn.write(Buffer.concat([
-      createParseMessage(querySql, queryId, paramTypes!),
+      createParseMessage(querySql, queryId, []),
       shouldFetchMetadata
         ? createDescribeMessage(DescribeType.PreparedStatement, queryId)
         : Buffer.of(),
