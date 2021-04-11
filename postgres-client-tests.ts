@@ -72,7 +72,7 @@ tests[t++] = (async () => {
 })()
 
 tests[t++] = (async () => {
-  const resultPromise = pool.run(sql`select oid from pg_catalog.pg_class`)
+  const resultPromise = pool.run(sql`select * from pg_catalog.pg_type`)
   resultPromise.cancel()
 
   try {
@@ -86,7 +86,7 @@ tests[t++] = (async () => {
 tests[t++] = (async () => {
   try {
     await pool.transaction(async tx => {
-      const resultPromise = tx.run(sql`select oid from pg_catalog.pg_class`)
+      const resultPromise = tx.run(sql`select * from pg_catalog.pg_type`)
       resultPromise.cancel()
       await resultPromise
       throw 'Failed to cancel query.'
