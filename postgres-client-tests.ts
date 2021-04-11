@@ -1,4 +1,4 @@
-import { newPool, Client, QueryCancelledError, sql } from './postgres-client'
+import { newPool, Client, QueryCancelledError, sql, ObjectId } from './postgres-client'
 import { ok, deepStrictEqual as eq } from 'assert'
 
 const start = process.hrtime()
@@ -27,6 +27,28 @@ tests[t++] = pool
   .run<{ one: 1, two: 2, three: 3 }, [2, 3]>({
     sql: `select 1::int one, $1::int two, $2::int three`,
     params: [2, 3]
+  })
+  .then(res => {
+    eq(res.rowsAffected, 1)
+    eq(res.rows.length, 1)
+    eq(Object.keys(res.rows[0]), ['one', 'two', 'three'])
+    eq(res.rows[0].one, 1)
+    eq(res.rows[0].two, 2)
+    eq(res.rows[0].three, 3)
+  })
+
+tests[t++] = pool
+  .run<{ one: 1, two: 2, three: 3 }, [2, 3]>({
+    sql: `select 1::int one, $1::int two, $2::int three`,
+    params: [2, 3],
+    metadata: {
+      paramTypes: [ObjectId.Int4, ObjectId.Int4],
+      rowMetadata: [
+        { type: ObjectId.Int4, name: 'one' },
+        { type: ObjectId.Int4, name: 'two' },
+        { type: ObjectId.Int4, name: 'three' },
+      ]
+    }
   })
   .then(res => {
     eq(res.rowsAffected, 1)

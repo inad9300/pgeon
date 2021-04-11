@@ -254,46 +254,36 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   }
 
   function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(conn: Connection, query: Query<R, P>): CancellablePromise<QueryResult<R>> {
-    query.id = query.id || ''
-    query.params = query.params || []
-
     let cancelled = false
     let cancelledPromise: Promise<void>
 
     const queryTimeoutId = setTimeout(() => resultPromise.cancel(), options.queryTimeout)
 
-    const resultPromise = prepareQuery(conn, query.id, query.sql)
-      .then(preparedQuery => {
+    const resultPromise = (async () => {
+      try {
+        query.id = query.id || ''
+        query.params = query.params || []
+        query.metadata = query.metadata || await prepareQuery(conn, query.id!, query.sql)
         if (cancelled) {
-          throw new QueryCancelledError('Query cancelled before query execution phase.')
-        }
-        return runPreparedQuery<R>(conn, { ...query, metadata: preparedQuery })
-          .then(queryResult => {
-            if (cancelled) {
-              throw new QueryCancelledError('Query cancelled after query execution phase.')
-            }
-            return queryResult
-          })
-          .catch(err => {
-            if (cancelled && !(err instanceof QueryCancelledError)) {
-              throw new QueryCancelledError('Query cancelled during query execution phase.')
-            }
-            throw err
-          })
-      })
-      .catch(err => {
-        if (cancelled && !(err instanceof QueryCancelledError)) {
+          try { await cancelledPromise! } catch {}
           throw new QueryCancelledError('Query cancelled during query preparation phase.')
         }
-        throw err
-      })
-      .finally(async () => {
-        clearTimeout(queryTimeoutId)
-
+        const queryResult = await runExtendedQuery<R>(conn, query as Required<Query>)
         if (cancelled) {
-          await cancelledPromise
+          try { await cancelledPromise! } catch {}
+          throw new QueryCancelledError('Query cancelled during query execution phase.')
         }
-      }) as CancellablePromise<QueryResult<R>>
+        return queryResult
+      } catch (err) {
+        if (cancelled && !(err instanceof QueryCancelledError)) {
+          try { await cancelledPromise! } catch {}
+          throw new QueryCancelledError(err.message)
+        }
+        throw err
+      } finally {
+        clearTimeout(queryTimeoutId)
+      }
+    })() as CancellablePromise<QueryResult<R>>
 
     resultPromise.cancel = () => {
       cancelled = true
@@ -566,34 +556,41 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string): Prom
 
 const commandsWithRowsAffected = ['INSERT', 'DELETE', 'UPDATE', 'SELECT', 'MOVE', 'FETCH', 'COPY']
 
-function runPreparedQuery<R extends Row>(conn: Connection, query: Query): Promise<QueryResult<R>> {
+function runExtendedQuery<R extends Row>(conn: Connection, query: Required<Query>): Promise<QueryResult<R>> {
   return new Promise((resolve, reject) => {
+    let preparedQuery: QueryMetadata | undefined
+    const { preparedQueries } = conn
+    if (query.id && preparedQueries[query.id]) {
+      preparedQuery = preparedQueries[query.id]
+    }
+
+    let parseCompleted = preparedQuery ? true : false
     let bindingCompleted = false
     let commandCompleted = false
 
+    const { rowMetadata } = query.metadata
     const rows: R[] = []
     let rowsAffected = 0
 
     const off = onConnectionData(conn, handleQueryExecution)
     conn.write(Buffer.concat([
-      createBindMessage(query.id!, query.params!, query.metadata!.paramTypes, ''),
+      preparedQuery ? Buffer.of() : createParseMessage(query.sql, query.id, []),
+      createBindMessage(query.id, query.params, query.metadata.paramTypes, ''),
       executeUnnamedPortalMessage,
       syncMessage
     ]))
 
     function handleQueryExecution(data: Buffer): void {
       const msgType = readUint8(data, 0) as BackendMessage
-      if (msgType === BackendMessage.DataRow) {
-        const paramCount = readInt16(data, 5)
-        if (query.metadata!.rowMetadata.length !== paramCount) {
-          console.warn(`[WARN] Received ${paramCount} query parameters, but ${query.metadata!.rowMetadata.length} column descriptions.`)
-          return
-        }
-
+      if (msgType === BackendMessage.ParseComplete) {
+        parseCompleted = true
+      }
+      else if (msgType === BackendMessage.DataRow) {
+        // const paramCount = readInt16(data, 5)
         const row: Row = {}
         let offset = 7
-        for (let i = 0; i < paramCount; ++i) {
-          const column = query.metadata!.rowMetadata[i]
+        for (let i = 0; i < rowMetadata.length; ++i) {
+          const column = rowMetadata[i]
           const valueSize = readInt32(data, offset)
           offset += 4
           if (valueSize === -1) {
@@ -652,7 +649,10 @@ function runPreparedQuery<R extends Row>(conn: Connection, query: Query): Promis
       else if (msgType === BackendMessage.ReadyForQuery) {
         // const txStatus = readUint8(data, 5) as TransactionStatus
         off()
-        if (bindingCompleted && commandCompleted) {
+        if (parseCompleted && bindingCompleted && commandCompleted) {
+          if (query.id) {
+            preparedQueries[query.id] = query.metadata
+          }
           return resolve({ rows, rowsAffected })
         } else {
           return reject(Error('Failed to execute prepared query.'))
