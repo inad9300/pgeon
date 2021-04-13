@@ -582,10 +582,7 @@ function runExtendedQuery<R extends Row>(conn: Connection, query: Required<Query
 
     function handleQueryExecution(data: Buffer): void {
       const msgType = readUint8(data, 0) as BackendMessage
-      if (msgType === BackendMessage.ParseComplete) {
-        parseCompleted = true
-      }
-      else if (msgType === BackendMessage.DataRow) {
+      if (msgType === BackendMessage.DataRow) {
         // const paramCount = readInt16(data, 5)
         const row: Row = {}
         let offset = 7
@@ -634,6 +631,9 @@ function runExtendedQuery<R extends Row>(conn: Connection, query: Required<Query
           }
         }
         rows.push(row as R)
+      }
+      else if (msgType === BackendMessage.ParseComplete) {
+        parseCompleted = true
       }
       else if (msgType === BackendMessage.BindComplete) {
         bindingCompleted = true
