@@ -206,10 +206,6 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
 
           idx = availableConnections.indexOf(conn)
           if (idx > -1) availableConnections.splice(idx, 1)
-
-          // if (openConnections.length < options.minConnections!) {
-          //   setTimeout(() => tryOpenConnection(Math.min(1024, options.connectTimeout!, retryDelay * 2)), retryDelay)
-          // }
         })
 
         openConnections.push(conn)
@@ -345,7 +341,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
         } else if (authRes === AuthenticationResponse.CleartextPassword) {
           conn.write(createCleartextPasswordMessage(options.password))
         } else {
-          return handleStartupPhaseError(Error(`Unsupported authentication response sent by server: "${AuthenticationResponse[authRes] || authRes}".`))
+          handleStartupPhaseError(Error(`Unsupported authentication response sent by server: "${AuthenticationResponse[authRes] || authRes}".`))
         }
       }
       else if (msgType === BackendMessage.ParameterStatus) {
@@ -363,11 +359,11 @@ function openConnection(options: PoolOptions): Promise<Connection> {
           conn.preparedQueries = {}
           resolve(conn)
         } else {
-          return handleStartupPhaseError(Error('Authentication could not be completed.'))
+          handleStartupPhaseError(Error('Authentication could not be completed.'))
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
-        return handleStartupPhaseError(new PostgresError(data))
+        handleStartupPhaseError(new PostgresError(data))
       }
       else if (msgType === BackendMessage.NegotiateProtocolVersion) {
         const minorVersion = readInt32(data, 5)
@@ -380,7 +376,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
           offset += opt.length
         }
         const unrecognizedOptionsMsg = unrecognizedOptions.length === 0 ? '' : ` The following options were not recognized by the server: ${unrecognizedOptions.join(', ')}.`
-        return handleStartupPhaseError(Error(`The Postgres server does not support protocol versions greather than 3.${minorVersion}.${unrecognizedOptionsMsg}`))
+        handleStartupPhaseError(Error(`The Postgres server does not support protocol versions greather than 3.${minorVersion}.${unrecognizedOptionsMsg}`))
       }
       else if (msgType === BackendMessage.NoticeResponse) {
         onNotice(data)
