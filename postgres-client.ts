@@ -191,12 +191,8 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   }
 
   function tryOpenConnection(retryDelay = 1) {
-    const connPromise = openConnection(options as PoolOptions)
-
-    connPromise
+    openConnection(options as PoolOptions)
       .then(conn => {
-        // conn.once('error', err => conn.destroy(err))
-
         conn.setTimeout(options.idleTimeout!)
         conn.on('timeout', () => {
           if (openConnections.length > options.minConnections!) {
@@ -205,8 +201,6 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
         })
 
         conn.on('close', () => {
-          conn.destroy(Error('Connection has been closed.'))
-
           let idx = openConnections.indexOf(conn)
           if (idx > -1) openConnections.splice(idx, 1)
 
@@ -303,11 +297,6 @@ function openConnection(options: PoolOptions): Promise<Connection> {
   return new Promise(async (resolve, reject) => {
     const conn = createTcpConnection(options.port, options.host) as Connection
 
-    function handleStartupPhaseError(err: Error) {
-      reject(err)
-      conn.destroy(err)
-    }
-
     const timeoutId = setTimeout(
       () => handleStartupPhaseError(Error('Stopping connection attempt as it has been going on for too long.')),
       options.connectTimeout
@@ -333,14 +322,13 @@ function openConnection(options: PoolOptions): Promise<Connection> {
       })
     }
 
-    conn.on('error', handleStartupPhaseError)
+    conn.once('error', handleStartupPhaseError)
+    conn.once('close', () => handleStartupPhaseError(Error('Connection has been closed.')))
 
-    conn.on('data', data => {
-      const msgType = readUint8(data, 0) as BackendMessage
-      if (msgType === BackendMessage.NoticeResponse) {
-        console.log('[NOTICE]', new PostgresError(data))
-      }
-    })
+    function handleStartupPhaseError(err: Error) {
+      reject(err)
+      conn.destroy(err)
+    }
 
     let authOk = false
 
@@ -394,6 +382,9 @@ function openConnection(options: PoolOptions): Promise<Connection> {
         const unrecognizedOptionsMsg = unrecognizedOptions.length === 0 ? '' : ` The following options were not recognized by the server: ${unrecognizedOptions.join(', ')}.`
         return handleStartupPhaseError(Error(`The Postgres server does not support protocol versions greather than 3.${minorVersion}.${unrecognizedOptionsMsg}`))
       }
+      else if (msgType === BackendMessage.NoticeResponse) {
+        onNotice(data)
+      }
       else {
         console.warn(`[WARN] Unexpected message type sent by server during startup phase: "${BackendMessage[msgType] || msgType}".`)
       }
@@ -403,10 +394,12 @@ function openConnection(options: PoolOptions): Promise<Connection> {
 
 function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback' | `savepoint ${string}` | `rollback to ${string}` | `release ${string}`): Promise<void> {
   return new Promise((resolve, reject) => {
-    let commandCompleted = false
-
     const off = onConnectionData(conn, handleSimpleQueryExecution)
+    conn.once('error', reject)
+    conn.once('close', reject)
     conn.write(createSimpleQueryMessage(query))
+
+    let commandCompleted = false
 
     function handleSimpleQueryExecution(data: Buffer): void {
       const msgType = readUint8(data, 0) as BackendMessage
@@ -415,15 +408,22 @@ function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'
       }
       else if (msgType === BackendMessage.ReadyForQuery) {
         off()
+        conn.off('error', reject)
+        conn.off('close', reject)
         if (commandCompleted) {
-          return resolve()
+          resolve()
         } else {
-          return reject(Error('Failed to execute simple query.'))
+          reject(Error('Failed to execute simple query.'))
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
         off()
-        return reject(new PostgresError(data))
+        conn.off('error', reject)
+        conn.off('close', reject)
+        reject(new PostgresError(data))
+      }
+      else if (msgType === BackendMessage.NoticeResponse) {
+        onNotice(data)
       }
       else {
         console.warn(`[WARN] Unexpected message received during simple query execution phase: ${BackendMessage[msgType] || msgType}.`)
@@ -488,6 +488,8 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string): Prom
     const rowMetadata: ColumnMetadata[] = []
 
     const off = onConnectionData(conn, handleQueryPreparation)
+    conn.once('error', reject)
+    conn.once('close', reject)
     conn.write(Buffer.concat([
       createParseMessage(querySql, queryId, []),
       createDescribeMessage(DescribeType.PreparedStatement, queryId),
@@ -527,19 +529,26 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string): Prom
       // "NoData" is expected for SQL queries without return value, e.g. DDL statements.
       else if (msgType === BackendMessage.ReadyForQuery || msgType === BackendMessage.NoData) {
         off()
+        conn.off('error', reject)
+        conn.off('close', reject)
         if (parseCompleted && (paramTypesFetched && (rowMetadataFetched || msgType === BackendMessage.NoData))) {
           const queryMetadata = { paramTypes, rowMetadata }
           if (queryId) {
             preparedQueries[queryId] = queryMetadata
           }
-          return resolve(queryMetadata)
+          resolve(queryMetadata)
         } else {
-          return reject(Error('Failed to parse query.'))
+          reject(Error('Failed to parse query.'))
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
         off()
-        return reject(new PostgresError(data))
+        conn.off('error', reject)
+        conn.off('close', reject)
+        reject(new PostgresError(data))
+      }
+      else if (msgType === BackendMessage.NoticeResponse) {
+        onNotice(data)
       }
       else {
         console.warn(`[WARN] Unexpected message received during query preparation phase: ${BackendMessage[msgType] || msgType}`)
@@ -567,6 +576,8 @@ function runExtendedQuery<R extends Row>(conn: Connection, query: Required<Query
     let rowsAffected = 0
 
     const off = onConnectionData(conn, handleQueryExecution)
+    conn.once('error', reject)
+    conn.once('close', reject)
     conn.write(Buffer.concat([
       preparedQuery ? Buffer.of() : createParseMessage(query.sql, query.id, []),
       createBindMessage(query.id, query.params, query.metadata.paramTypes, ''),
@@ -643,18 +654,25 @@ function runExtendedQuery<R extends Row>(conn: Connection, query: Required<Query
       else if (msgType === BackendMessage.ReadyForQuery) {
         // const txStatus = readUint8(data, 5) as TransactionStatus
         off()
+        conn.off('error', reject)
+        conn.off('close', reject)
         if (parseCompleted && bindingCompleted && commandCompleted) {
           if (query.id) {
             preparedQueries[query.id] = query.metadata
           }
-          return resolve({ rows, rowsAffected })
+          resolve({ rows, rowsAffected })
         } else {
-          return reject(Error('Failed to execute prepared query.'))
+          reject(Error('Failed to execute prepared query.'))
         }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
         off()
-        return reject(new PostgresError(data))
+        conn.off('error', reject)
+        conn.off('close', reject)
+        reject(new PostgresError(data))
+      }
+      else if (msgType === BackendMessage.NoticeResponse) {
+        onNotice(data)
       }
       else {
         console.warn(`[WARN] Unexpected message received during prepared query execution phase: ${BackendMessage[msgType] || msgType}.`)
@@ -716,6 +734,10 @@ function onConnectionData(conn: Connection, callback: (data: Buffer) => void) {
   }
 
   return () => conn.off('data', dataHandler)
+}
+
+function onNotice(data: Buffer) {
+  console.log('Postgres notice: ', new PostgresError(data))
 }
 
 const sslRequestMessage = createSslRequestMessage()
