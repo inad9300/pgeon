@@ -301,17 +301,17 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
 
 function openConnection(options: PoolOptions): Promise<Connection> {
   return new Promise(async (resolve, reject) => {
-    const timeoutId = setTimeout(
-      () => handleStartupPhaseError(Error('Stopping connection attempt as it has been going on for too long.')),
-      options.connectTimeout
-    )
-
     const conn = createTcpConnection(options.port, options.host) as Connection
 
     function handleStartupPhaseError(err: Error) {
       reject(err)
-      conn?.destroy(err)
+      conn.destroy(err)
     }
+
+    const timeoutId = setTimeout(
+      () => handleStartupPhaseError(Error('Stopping connection attempt as it has been going on for too long.')),
+      options.connectTimeout
+    )
 
     if (options.ssl) {
       conn.once('connect', () => conn.write(sslRequestMessage))
@@ -404,7 +404,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
   })
 }
 
-function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'): Promise<void> {
+function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback' | `savepoint ${string}` | `rollback to ${string}` | `release ${string}`): Promise<void> {
   return new Promise((resolve, reject) => {
     let commandCompleted = false
 
