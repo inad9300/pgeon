@@ -6,6 +6,7 @@ import { connect as createTlsConnection, ConnectionOptions } from 'tls'
 // - https://postgresql.org/docs/current/protocol.html
 // - https://postgresql.org/docs/current/datatype.html
 // - https://beta.pgcon.org/2014/schedule/attachments/330_postgres-for-the-wire.pdf
+// - https://segmentfault.com/a/1190000017136059
 // - https://github.com/postgres/postgres/tree/master/src/backend/libpq
 // - https://github.com/postgres/postgres/tree/master/src/backend/utils/adt
 
