@@ -301,7 +301,7 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
 
 function openConnection(options: PoolOptions): Promise<Connection> {
   return new Promise(async (resolve, reject) => {
-    const connectTimeoutId = setTimeout(
+    const timeoutId = setTimeout(
       () => handleStartupPhaseError(Error('Stopping connection attempt as it has been going on for too long.')),
       options.connectTimeout
     )
@@ -314,14 +314,12 @@ function openConnection(options: PoolOptions): Promise<Connection> {
     }
 
     if (options.ssl) {
-      conn.once('connect', () => {
-        conn.write(sslRequestMessage)
-        conn.on('data', handleStartupPhase)
-      })
+      conn.once('connect', () => conn.write(sslRequestMessage))
       conn.once('data', data => {
         if (readUint8(data, 0) === 83) { // 'S'
           createTlsConnection({ socket: conn, ...options.ssl })
           conn.write(createStartupMessage(options.username, options.database))
+          conn.on('data', handleStartupPhase)
         } else {
           handleStartupPhaseError(Error('Postgres server does not support SSL.'))
         }
@@ -370,7 +368,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
       }
       else if (msgType === BackendMessage.ReadyForQuery) {
         if (authOk) {
-          clearTimeout(connectTimeoutId)
+          clearTimeout(timeoutId)
           conn.off('data', handleStartupPhase)
           conn.preparedQueries = {}
           resolve(conn)
@@ -446,7 +444,7 @@ function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = Colum
     cancelledPromise = cancelCurrentQuery(conn, options)
   }
 
-  const queryTimeoutId = setTimeout(cancel, options.queryTimeout)
+  const timeoutId = setTimeout(cancel, options.queryTimeout)
 
   const resultPromise = (async () => {
     try {
@@ -470,7 +468,7 @@ function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = Colum
       }
       throw err
     } finally {
-      clearTimeout(queryTimeoutId)
+      clearTimeout(timeoutId)
     }
   })() as CancellablePromise<QueryResult<R>>
 
