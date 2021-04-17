@@ -168,7 +168,7 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   const { env } = process
 
   // Environment variables read from the following sources:
-  // 1. https://www.postgresql.org/docs/current/libpq-envars.html
+  // 1. https://postgresql.org/docs/current/libpq-envars.html
   // 2. https://hub.docker.com/_/postgres
   options.host           = options.host           ||  env.PGHOST     || 'localhost'
   options.port           = options.port           || (env.PGPORT      ? parseInt(env.PGPORT, 10)  : 5432)
@@ -1467,7 +1467,7 @@ const enum ErrorResponseType {
   Where             =  87, // 'W'
 }
 
-// https://www.postgresql.org/docs/current/errcodes-appendix.html
+// https://postgresql.org/docs/current/errcodes-appendix.html
 const enum ErrorCode {
   successful_completion                                = '00000',
   warning                                              = '01000',
