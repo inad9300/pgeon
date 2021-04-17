@@ -194,9 +194,8 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       .then(conn => {
         conn.setTimeout(options.idleTimeout!)
         conn.on('timeout', () => {
-          if (openConnections.length > options.minConnections!) {
+          if (openConnections.length > options.minConnections!)
             conn.destroy(Error('Closing connection as it has been idle for too long.'))
-          }
         })
 
         conn.on('close', () => {
