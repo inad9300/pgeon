@@ -181,50 +181,70 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   options.queryTimeout   = options.queryTimeout   || 120_000
   options.idleTimeout    = options.idleTimeout    || 300_000
 
-  const connCount = { value: 0 }
-  const connPool: Promise<Connection>[] = []
-  const connQueue: ((connPromise: Promise<Connection>) => void)[] = []
+  const openConnections: Promise<Connection>[] = []
+  const availableConnections: Promise<Connection>[] = []
+  const waitingForConnection: ((connPromise: Promise<Connection>) => void)[] = []
 
-  for (let i = connCount.value; i < options.minConnections; ++i) {
-    putConnectionInPool()
+  for (let i = 0; i < options.minConnections; ++i) {
+    tryOpenConnection()
   }
 
-  function putConnectionInPool(retryDelay = 1) {
-    const connPromise = openConnection(options as PoolOptions, connCount)
-    connPromise.catch(() => {
-      const idx = connPool.indexOf(connPromise)
-      if (idx > -1) {
-        connPool.splice(idx, 1)
-      }
-      connCount.value--
-      if (connCount.value < options.minConnections!) {
-        setTimeout(() => putConnectionInPool(Math.min(1024, options.connectTimeout!, retryDelay * 2)), retryDelay)
-      }
-    })
-    connCount.value++
-    onConnectionAvailable(connPromise)
+  function tryOpenConnection(retryDelay = 1) {
+    const connPromise = openConnection(options as PoolOptions)
+
+    connPromise
+      .then(conn => {
+        // conn.once('error', err => conn.destroy(err))
+
+        conn.setTimeout(options.idleTimeout!)
+        conn.on('timeout', () => {
+          if (openConnections.length > options.minConnections!) {
+            conn.destroy(Error('Closing connection as it has been idle for too long.'))
+          }
+        })
+
+        conn.on('close', () => {
+          conn.destroy(Error('Connection has been closed.'))
+
+          let idx = openConnections.indexOf(connPromise)
+          if (idx > -1) openConnections.splice(idx, 1)
+
+          idx = availableConnections.indexOf(connPromise)
+          if (idx > -1) availableConnections.splice(idx, 1)
+
+          // if (openConnections.length < options.minConnections!) {
+          //   setTimeout(() => tryOpenConnection(Math.min(1024, options.connectTimeout!, retryDelay * 2)), retryDelay)
+          // }
+        })
+      })
+      .catch(() => {
+        if (openConnections.length < options.minConnections!) {
+          setTimeout(() => tryOpenConnection(Math.min(1024, options.connectTimeout!, retryDelay * 2)), retryDelay)
+        }
+      })
+
+    openConnections.push(connPromise)
+    lendConnection(connPromise)
   }
 
-  function takeConnectionFromPool(): Promise<Connection> {
-    if (connPool.length === 0 && connCount.value < options.maxConnections!) {
-      putConnectionInPool()
-    }
-    return connPool.length > 0
-      ? connPool.pop()!
-      : new Promise(resolve => connQueue.push(resolve))
-  }
-
-  function onConnectionAvailable(connPromise: Promise<Connection>) {
-    if (connQueue.length > 0) {
-      connQueue.shift()!(connPromise)
+  function lendConnection(connPromise: Promise<Connection>) {
+    if (waitingForConnection.length > 0) {
+      waitingForConnection.shift()!(connPromise)
     } else {
-      connPool.push(connPromise)
+      availableConnections.push(connPromise)
     }
   }
 
-  function withConnection<T>(callback: (conn: Connection) => Promise<T>): CancellablePromise<T> {
+  function borrowConnection<T>(callback: (conn: Connection) => Promise<T>): CancellablePromise<T> {
     let cancelled = false
-    const connPromise = takeConnectionFromPool()
+
+    if (availableConnections.length === 0 && openConnections.length < options.maxConnections!) {
+      tryOpenConnection()
+    }
+
+    const connPromise = availableConnections.length > 0
+      ? availableConnections.pop()!
+      : new Promise<Connection>(resolve => waitingForConnection.push(conn => resolve(conn)))
 
     const resultPromise = connPromise
       .then(conn => {
@@ -241,13 +261,13 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       })
       .finally(() => {
         if (!cancelled) {
-          onConnectionAvailable(connPromise)
+          lendConnection(connPromise)
         }
       }) as CancellablePromise<T>
 
     resultPromise.cancel = () => {
       cancelled = true
-      onConnectionAvailable(connPromise)
+      lendConnection(connPromise)
     }
 
     return resultPromise
@@ -255,13 +275,13 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
 
   return {
     run<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(query: Query<R, P>): CancellablePromise<QueryResult<R>> {
-      return withConnection(conn => prepareAndRunQuery(conn, query, options as PoolOptions))
+      return borrowConnection(conn => prepareAndRunQuery(conn, query, options as PoolOptions))
     },
     getQueryMetadata(querySql: string): Promise<QueryMetadata> {
-      return withConnection(conn => prepareQuery(conn, '', querySql))
+      return borrowConnection(conn => prepareQuery(conn, '', querySql))
     },
     transaction(callback: (client: Client) => Promise<void>): Promise<void> {
-      return withConnection(async conn => {
+      return borrowConnection(async conn => {
         function run<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(query: Query<R, P>): CancellablePromise<QueryResult<R>> {
           return prepareAndRunQuery(conn, query, options as PoolOptions)
         }
@@ -276,20 +296,20 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       })
     },
     destroy() {
-      const connPoolCopy = [...connPool]
-      options.minConnections
-        = options.maxConnections
-        = connQueue.length
-        = connPool.length
-        = 0
-      for (const connPromise of connPoolCopy) {
+      for (const connPromise of openConnections) {
         connPromise.then(conn => conn.destroy())
       }
+      options.minConnections
+        = options.maxConnections
+        = waitingForConnection.length
+        = availableConnections.length
+        = openConnections.length
+        = 0
     }
   }
 }
 
-function openConnection(options: PoolOptions, connCount: { value: number }): Promise<Connection> {
+function openConnection(options: PoolOptions): Promise<Connection> {
   return new Promise(async (resolve, reject) => {
     const connectTimeoutId = setTimeout(
       () => handleStartupPhaseError(Error('Stopping connection attempt as it has been going on for too long.')),
@@ -323,15 +343,6 @@ function openConnection(options: PoolOptions, connCount: { value: number }): Pro
     }
 
     conn.on('error', handleStartupPhaseError)
-
-    conn.setTimeout(options.idleTimeout)
-    conn.on('timeout', () => {
-      if (connCount.value > options.minConnections) {
-        handleStartupPhaseError(Error('Closing connection as it has been idle for too long.'))
-      }
-    })
-
-    conn.on('close', () => handleStartupPhaseError(Error('Connection has been closed.')))
 
     conn.on('data', data => {
       const msgType = readUint8(data, 0) as BackendMessage
