@@ -320,6 +320,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
       conn.once('data', data => {
         if (readUint8(data, 0) === 83) { // 'S'
           createTlsConnection({ socket: conn, ...options.ssl })
+          conn.write(createStartupMessage(options.username, options.database))
         } else {
           handleStartupPhaseError(Error('Postgres server does not support SSL.'))
         }
