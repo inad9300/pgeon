@@ -34,7 +34,7 @@ export interface Pool extends Client {
   destroy(): void
 }
 
-export interface Query<_R extends Row = Row, _P extends ColumnValue[] = ColumnValue[]> {
+export interface Query<_ROW extends Row = Row, _PARAMS extends ColumnValue[] = ColumnValue[]> {
   sql: string
   params?: ColumnValue[]
   id?: string
@@ -125,7 +125,7 @@ export class PostgresError extends Error {
   }
 }
 
-export function sql<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(queryTextParts: TemplateStringsArray, ...params: P): Query<R, P> {
+export function sql<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(sqlParts: TemplateStringsArray, ...params: P): Query<R, P> {
   const lastIdx = params.length
   const uniqueParams = [] as any[] as P
   const argIndices: number[] = []
@@ -144,16 +144,16 @@ export function sql<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]
     uniqueParams.push(val)
   }
 
-  let queryText = ''
-  for (let i = 0; i < lastIdx; ++i) {
-    queryText += queryTextParts[i] + '$' + argIndices[i]
-  }
-  queryText += queryTextParts[lastIdx]
+  let sql = ''
+  for (let i = 0; i < lastIdx; ++i)
+    sql += sqlParts[i] + '$' + argIndices[i]
+
+  sql += sqlParts[lastIdx]
 
   return {
-    sql: queryText,
+    sql,
     params: uniqueParams,
-    id: md5(queryText)
+    id: md5(sql)
   }
 }
 
@@ -186,9 +186,8 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   const availableConnections: Connection[] = []
   const waitingForConnection: ((conn: Connection) => void)[] = []
 
-  for (let i = 0; i < options.minConnections; ++i) {
+  for (let i = 0; i < options.minConnections; ++i)
     tryOpenConnection()
-  }
 
   function tryOpenConnection(retryDelay = 1) {
     openConnection(options as PoolOptions)
@@ -212,18 +211,16 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
         lendConnection(conn)
       })
       .catch(() => {
-        if (openConnections.length < options.minConnections!) {
+        if (openConnections.length < options.minConnections!)
           setTimeout(() => tryOpenConnection(Math.min(1024, options.connectTimeout!, retryDelay * 2)), retryDelay)
-        }
       })
   }
 
   function lendConnection(conn: Connection) {
-    if (waitingForConnection.length > 0) {
+    if (waitingForConnection.length > 0)
       waitingForConnection.shift()!(conn)
-    } else {
+    else
       availableConnections.push(conn)
-    }
   }
 
   function borrowConnection<T>(callback: (conn: Connection) => Promise<T>): CancellablePromise<T> {
@@ -234,18 +231,17 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       return resultPromise
     }
 
-    if (openConnections.length < options.maxConnections!) {
+    if (openConnections.length < options.maxConnections!)
       tryOpenConnection()
-    }
 
     let cancelled = false
 
     const connPromise = new Promise<Connection>(resolve => waitingForConnection.push(resolve))
 
     const resultPromise = connPromise.then(conn => {
-      if (cancelled) {
+      if (cancelled)
         throw new QueryCancelledError('Query cancelled during connection acquisition phase.')
-      }
+
       return callback(conn).finally(() => lendConnection(conn))
     }) as CancellablePromise<T>
 
@@ -276,9 +272,9 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       })
     },
     destroy() {
-      for (const conn of openConnections) {
+      for (const conn of openConnections)
         conn.destroy()
-      }
+
       options.minConnections
         = options.maxConnections
         = waitingForConnection.length
@@ -406,11 +402,10 @@ function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'
         off()
         conn.off('error', reject)
         conn.off('close', reject)
-        if (commandCompleted) {
+        if (commandCompleted)
           resolve()
-        } else {
+        else
           reject(Error('Failed to execute simple query.'))
-        }
       }
       else if (msgType === BackendMessage.ErrorResponse) {
         off()
@@ -471,9 +466,8 @@ function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = Colum
 
 function prepareQuery(conn: Connection, queryId: string, querySql: string): Promise<QueryMetadata> {
   const { preparedQueries } = conn
-  if (queryId && preparedQueries[queryId]) {
+  if (queryId && preparedQueries[queryId])
     return Promise.resolve(preparedQueries[queryId])
-  }
 
   return new Promise((resolve, reject) => {
     let parseCompleted = false
@@ -529,9 +523,9 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string): Prom
         conn.off('close', reject)
         if (parseCompleted && (paramTypesFetched && (rowMetadataFetched || msgType === BackendMessage.NoData))) {
           const queryMetadata = { paramTypes, rowMetadata }
-          if (queryId) {
+          if (queryId)
             preparedQueries[queryId] = queryMetadata
-          }
+
           resolve(queryMetadata)
         } else {
           reject(Error('Failed to parse query.'))
@@ -559,9 +553,8 @@ function runExtendedQuery<R extends Row>(conn: Connection, query: Required<Query
   return new Promise((resolve, reject) => {
     let preparedQuery: QueryMetadata | undefined
     const { preparedQueries } = conn
-    if (query.id && preparedQueries[query.id]) {
+    if (query.id && preparedQueries[query.id])
       preparedQuery = preparedQueries[query.id]
-    }
 
     let parseCompleted = preparedQuery ? true : false
     let bindingCompleted = false
@@ -653,9 +646,9 @@ function runExtendedQuery<R extends Row>(conn: Connection, query: Required<Query
         conn.off('error', reject)
         conn.off('close', reject)
         if (parseCompleted && bindingCompleted && commandCompleted) {
-          if (query.id) {
+          if (query.id)
             preparedQueries[query.id] = query.metadata
-          }
+
           resolve({ rows, rowsAffected })
         } else {
           reject(Error('Failed to execute prepared query.'))
@@ -724,9 +717,8 @@ function onConnectionData(conn: Connection, callback: (data: Buffer) => void) {
 
     callback(data)
 
-    if (data.byteLength > msgSize) {
+    if (data.byteLength > msgSize)
       dataHandler(data.slice(msgSize))
-    }
   }
 
   return () => conn.off('data', dataHandler)
@@ -752,10 +744,9 @@ function createStartupMessage(username: string, database: string): Buffer {
   let size = 15 + Buffer.byteLength(username)
 
   const differentNames = database !== username
-  if (differentNames) {
+  if (differentNames)
     // 10 = 9 ("database" and null terminator) + 1 (database null terminator)
     size += 10 + Buffer.byteLength(database)
-  }
 
   const message = Buffer.allocUnsafe(size)
   let offset = 0
@@ -835,9 +826,8 @@ function createParseMessage(querySql: string, queryId: string, paramTypes: Objec
   offset = writeCString(message, querySql, offset)
   offset = writeInt16(message, paramTypes.length, offset)
 
-  for (const t of paramTypes) {
+  for (const t of paramTypes)
     offset = writeInt32(message, t, offset)
-  }
 
   return message
 }
@@ -1197,13 +1187,12 @@ const enum NumericSign {
 // See https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/numeric.c
 function readNumeric(buffer: Buffer, offset: number): string {
   const sign = readUint16(buffer, offset + 4)
-  if (sign === NumericSign.NaN) {
+  if (sign === NumericSign.NaN)
     return 'NaN'
-  } else if (sign === NumericSign.Infinity) {
+  else if (sign === NumericSign.Infinity)
     return 'Infinity'
-  } else if (sign === NumericSign.NegativeInfinity) {
+  else if (sign === NumericSign.NegativeInfinity)
     return '-Infinity'
-  }
 
   const digitsCount = readUint16(buffer, offset)
   let weight = readInt16(buffer, offset + 2) // There are `weight + 1` digits before the decimal point.
@@ -1212,9 +1201,9 @@ function readNumeric(buffer: Buffer, offset: number): string {
 
   wholePart: {
     while (true) {
-      if (i >= digitsCount) {
+      if (i >= digitsCount)
         weight = -1
-      }
+
       if (weight < 0) {
         result += '0'
         break wholePart
@@ -1249,11 +1238,10 @@ function readNumeric(buffer: Buffer, offset: number): string {
 
     const omittedZeros = -1 - weight
     if (omittedZeros > 0) {
-      if (4 * omittedZeros > decimalsCount) {
+      if (4 * omittedZeros > decimalsCount)
         return result + '0'.repeat(decimalsCount)
-      } else {
+      else
         result += '0'.repeat(4 * omittedZeros)
-      }
     }
 
     while (-4 * weight <= decimalsCount) {
@@ -1300,17 +1288,15 @@ function writeNumeric(buffer: Buffer, value: string, offset: number): number {
   if (wholePart.length > 0) {
     weight = Math.ceil(wholePart.length / 4 - 1)
     wholePart = '0'.repeat(4 - ((wholePart.length - 1) % 4 + 1)) + wholePart
-    for (let i = 0; i < wholePart.length; i += 4) {
+    for (let i = 0; i < wholePart.length; i += 4)
       offset = writeUint16(buffer, parseInt(wholePart.substr(i, 4), 10), offset)
-    }
   }
 
   const decimalsCount = decimalPart.length
   if (decimalsCount > 0) {
     decimalPart += '0'.repeat(4 - ((decimalsCount - 1) % 4 + 1))
-    for (let i = 0; i < decimalPart.length; i += 4) {
+    for (let i = 0; i < decimalPart.length; i += 4)
       offset = writeUint16(buffer, parseInt(decimalPart.substr(i, 4), 10), offset)
-    }
   }
 
   writeUint16(buffer, (wholePart.length + decimalPart.length) / 4, initialOffset)
