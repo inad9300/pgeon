@@ -253,49 +253,9 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
     return resultPromise
   }
 
-  function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(conn: Connection, query: Query<R, P>): CancellablePromise<QueryResult<R>> {
-    let cancelled = false
-    let cancelledPromise: Promise<void>
-
-    const queryTimeoutId = setTimeout(() => resultPromise.cancel(), options.queryTimeout)
-
-    const resultPromise = (async () => {
-      try {
-        query.id = query.id || ''
-        query.params = query.params || []
-        query.metadata = query.metadata || await prepareQuery(conn, query.id!, query.sql)
-        if (cancelled) {
-          try { await cancelledPromise! } catch {}
-          throw new QueryCancelledError('Query cancelled during query preparation phase.')
-        }
-        const queryResult = await runExtendedQuery<R>(conn, query as Required<Query>)
-        if (cancelled) {
-          try { await cancelledPromise! } catch {}
-          throw new QueryCancelledError('Query cancelled during query execution phase.')
-        }
-        return queryResult
-      } catch (err) {
-        if (cancelled && !(err instanceof QueryCancelledError)) {
-          try { await cancelledPromise! } catch {}
-          throw new QueryCancelledError(err.message)
-        }
-        throw err
-      } finally {
-        clearTimeout(queryTimeoutId)
-      }
-    })() as CancellablePromise<QueryResult<R>>
-
-    resultPromise.cancel = () => {
-      cancelled = true
-      cancelledPromise = cancelCurrentQuery(conn, options as PoolOptions)
-    }
-
-    return resultPromise
-  }
-
   return {
     run<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(query: Query<R, P>): CancellablePromise<QueryResult<R>> {
-      return withConnection(conn => prepareAndRunQuery(conn, query))
+      return withConnection(conn => prepareAndRunQuery(conn, query, options as PoolOptions))
     },
     getQueryMetadata(querySql: string): Promise<QueryMetadata> {
       return withConnection(conn => prepareQuery(conn, '', querySql))
@@ -303,7 +263,7 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
     transaction(callback: (client: Client) => Promise<void>): Promise<void> {
       return withConnection(async conn => {
         function run<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(query: Query<R, P>): CancellablePromise<QueryResult<R>> {
-          return prepareAndRunQuery(conn, query)
+          return prepareAndRunQuery(conn, query, options as PoolOptions)
         }
 
         await runSimpleQuery(conn, 'begin')
@@ -468,15 +428,52 @@ function runSimpleQuery(conn: Connection, query: 'begin' | 'commit' | 'rollback'
         off()
         return reject(new PostgresError(data))
       }
-      else if (msgType === BackendMessage.EmptyQueryResponse) {
-        off()
-        return reject(Error('Empty query received.'))
-      }
       else {
         console.warn(`[WARN] Unexpected message received during simple query execution phase: ${BackendMessage[msgType] || msgType}.`)
       }
     }
   })
+}
+
+function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]>(conn: Connection, query: Query<R, P>, options: PoolOptions): CancellablePromise<QueryResult<R>> {
+  let cancelled = false
+  let cancelledPromise: Promise<void>
+
+  function cancel() {
+    cancelled = true
+    cancelledPromise = cancelCurrentQuery(conn, options)
+  }
+
+  const queryTimeoutId = setTimeout(cancel, options.queryTimeout)
+
+  const resultPromise = (async () => {
+    try {
+      query.id = query.id || ''
+      query.params = query.params || []
+      query.metadata = query.metadata || await prepareQuery(conn, query.id!, query.sql)
+      if (cancelled) {
+        try { await cancelledPromise! } catch {}
+        throw new QueryCancelledError('Query cancelled during query preparation phase.')
+      }
+      const queryResult = await runExtendedQuery<R>(conn, query as Required<Query>)
+      if (cancelled) {
+        try { await cancelledPromise! } catch {}
+        throw new QueryCancelledError('Query cancelled during query execution phase.')
+      }
+      return queryResult
+    } catch (err) {
+      if (cancelled && !(err instanceof QueryCancelledError)) {
+        try { await cancelledPromise! } catch {}
+        throw new QueryCancelledError(err.message)
+      }
+      throw err
+    } finally {
+      clearTimeout(queryTimeoutId)
+    }
+  })() as CancellablePromise<QueryResult<R>>
+
+  resultPromise.cancel = cancel
+  return resultPromise
 }
 
 function prepareQuery(conn: Connection, queryId: string, querySql: string): Promise<QueryMetadata> {
@@ -548,7 +545,7 @@ function prepareQuery(conn: Connection, queryId: string, querySql: string): Prom
         return reject(new PostgresError(data))
       }
       else {
-        console.warn('[WARN] Unexpected message received during query preparation phase: ' + (BackendMessage[msgType] || msgType))
+        console.warn(`[WARN] Unexpected message received during query preparation phase: ${BackendMessage[msgType] || msgType}`)
       }
     }
   })
@@ -662,10 +659,6 @@ function runExtendedQuery<R extends Row>(conn: Connection, query: Required<Query
         off()
         return reject(new PostgresError(data))
       }
-      else if (msgType === BackendMessage.EmptyQueryResponse) {
-        off()
-        return reject(Error('Empty query received.'))
-      }
       else {
         console.warn(`[WARN] Unexpected message received during prepared query execution phase: ${BackendMessage[msgType] || msgType}.`)
       }
@@ -689,7 +682,7 @@ function cancelCurrentQuery(conn: Connection, options: PoolOptions): Promise<voi
           cancelConn.destroy(err)
         } else {
           // An error may still be emitted, see https://nodejs.org/api/stream.html#stream_writable_write_chunk_encoding_callback
-          setTimeout(() => resolve())
+          setTimeout(resolve)
         }
       })
     )
