@@ -313,13 +313,15 @@ function openConnection(options: PoolOptions): Promise<Connection> {
       options.connectTimeout
     )
 
+    let off: () => void
+
     if (options.ssl) {
       conn.once('connect', () => conn.write(sslRequestMessage))
       conn.once('data', data => {
         if (readUint8(data, 0) === 83) { // 'S'
           createTlsConnection({ socket: conn, ...options.ssl })
           conn.write(createStartupMessage(options.username, options.database))
-          conn.on('data', handleStartupPhase)
+          off = onConnectionData(conn, handleStartupPhase)
         } else {
           handleStartupPhaseError(Error('Postgres server does not support SSL.'))
         }
@@ -327,7 +329,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
     } else {
       conn.once('connect', () => {
         conn.write(createStartupMessage(options.username, options.database))
-        conn.on('data', handleStartupPhase)
+        off = onConnectionData(conn, handleStartupPhase)
       })
     }
 
@@ -369,7 +371,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
       else if (msgType === BackendMessage.ReadyForQuery) {
         if (authOk) {
           clearTimeout(timeoutId)
-          conn.off('data', handleStartupPhase)
+          off()
           conn.preparedQueries = {}
           resolve(conn)
         } else {
@@ -394,11 +396,6 @@ function openConnection(options: PoolOptions): Promise<Connection> {
       }
       else {
         console.warn(`[WARN] Unexpected message type sent by server during startup phase: "${BackendMessage[msgType] || msgType}".`)
-      }
-
-      const msgSize = 1 + readInt32(data, 1)
-      if (data.byteLength > msgSize) {
-        handleStartupPhase(data.slice(msgSize))
       }
     }
   })
