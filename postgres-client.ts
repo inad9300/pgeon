@@ -724,7 +724,7 @@ function onConnectionData(conn: Connection, callback: (data: Buffer) => void) {
 }
 
 function onNotice(data: Buffer) {
-  console.log('Postgres notice: ', new PostgresError(data))
+  console.log('Postgres notice:', new PostgresError(data))
 }
 
 const sslRequestMessage = createSslRequestMessage()
@@ -1193,85 +1193,59 @@ function readNumeric(buffer: Buffer, offset: number): string {
   else if (sign === NumericSign.NegativeInfinity)
     return '-Infinity'
 
-  const digitsCount = readUint16(buffer, offset)
-  let weight = readInt16(buffer, offset + 2) // There are `weight + 1` digits before the decimal point.
+  const digitsInBuffer = readUint16(buffer, offset) // Number of base-10000 digits in the buffer
+  const weight = readInt16(buffer, offset + 2)
+  const wholesCount = weight + 1 // There are `weight + 1` base-10000 digits before the decimal point in the decoded number
+  const wholesInBuffer = Math.max(0, Math.min(wholesCount, digitsInBuffer))
   let result = sign === NumericSign.Minus ? '-' : ''
-  let i = 0
 
-  wholePart: {
-    while (true) {
-      if (i >= digitsCount)
-        weight = -1
+  if (digitsInBuffer === 0 || wholesCount <= 0) {
+    result += '0'
+  } else {
+    if (wholesInBuffer > 0)
+      result += readNumericDigit(buffer, 0)
 
-      if (weight < 0) {
-        result += '0'
-        break wholePart
-      }
+    for (let i = 1; i < wholesInBuffer; ++i)
+      result += ('' + readNumericDigit(buffer, i)).padStart(4, '0')
 
-      const digit = readNumericDigit(buffer, i)
-      i++
-      weight--
-
-      if (digit !== 0) {
-        result += digit
-        break
-      }
-    }
-
-    while (weight >= 0 && i < digitsCount) {
-      const digit = readNumericDigit(buffer, i)
-      i++
-      weight--
-      result += ('' + (10_000 + digit)).substr(1)
-    }
-
-    while (weight >= 0) {
-      result += '0000'
-      weight--
-    }
+    const omittedZeros = wholesCount - wholesInBuffer
+    if (omittedZeros > 0)
+      result += '0'.repeat(4 * omittedZeros)
   }
 
-  const decimalsCount = readUint16(buffer, offset + 6)
+  const decimalsCount = readUint16(buffer, offset + 6) // Number of base-10 decimals in the decoded number
   if (decimalsCount > 0) {
     result += '.'
 
-    const omittedZeros = -1 - weight
-    if (omittedZeros > 0) {
-      if (4 * omittedZeros > decimalsCount)
-        return result + '0'.repeat(decimalsCount)
-      else
-        result += '0'.repeat(4 * omittedZeros)
-    }
+    let decimals = ''
 
-    while (-4 * weight <= decimalsCount) {
-      if (i < digitsCount) {
-        const digit = readNumericDigit(buffer, i)
-        result += ('' + (10_000 + digit)).substr(1)
-      } else {
-        result += '0000'
-      }
-      i++
-      weight--
-    }
+    const omittedZeros = wholesCount < 0 ? -1 * wholesCount : 0
+    decimals += '0'.repeat(4 * omittedZeros)
 
-    const digit = i < digitsCount ? readNumericDigit(buffer, i) : 0
-    result += ('' + (10_000 + digit)).substr(1, decimalsCount % 4)
+    for (let i = wholesInBuffer; i < digitsInBuffer; ++i)
+      decimals += ('' + readNumericDigit(buffer, i)).padStart(4, '0')
+
+    result += decimals.length < decimalsCount
+      ? decimals.padEnd(decimalsCount, '0')
+      : decimals.length > decimalsCount
+      ? decimals.substr(0, decimalsCount)
+      : decimals
   }
 
   return result
 }
 
-function readNumericDigit(buffer: Buffer, index: number) {
-  return readUint16(buffer, 8 + 2 * index)
+function readNumericDigit(buffer: Buffer, idx: number) {
+  return readUint16(buffer, 8 + 2 * idx)
 }
 
 // NOTE Postgres 14 may support 'Infinity' and '-Infinity' in numeric fields.
 function writeNumeric(buffer: Buffer, value: string, offset: number): number {
   if (value === 'NaN') {
-    writeUint16(buffer, 0, offset) // Number of digits
-    writeInt16(buffer, 0, offset + 2) // Weight
-    writeUint16(buffer, NumericSign.NaN, offset + 4) // Sign
-    return writeUint16(buffer, 0, offset + 6) // Number of decimals
+    writeUint16(buffer, 0, offset)
+    writeInt16(buffer, 0, offset + 2)
+    writeUint16(buffer, NumericSign.NaN, offset + 4)
+    return writeUint16(buffer, 0, offset + 6)
   }
 
   let [wholePart, decimalPart = ''] = value.split('.')
@@ -1285,7 +1259,7 @@ function writeNumeric(buffer: Buffer, value: string, offset: number): number {
 
   let weight = -1
   if (wholePart.length > 0) {
-    weight = Math.ceil(wholePart.length / 4 - 1)
+    weight = Math.ceil(wholePart.length / 4) - 1
     wholePart = '0'.repeat(4 - ((wholePart.length - 1) % 4 + 1)) + wholePart
     for (let i = 0; i < wholePart.length; i += 4)
       offset = writeUint16(buffer, parseInt(wholePart.substr(i, 4), 10), offset)

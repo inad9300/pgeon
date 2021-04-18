@@ -142,7 +142,7 @@ const MAX_FLOAT_64 =      (2 - 2 ** -52) * 2 ** 1023 // Number.MAX_VALUE
 
 const MIN_POSITIVE_FLOAT_64 = 5e-324 // Number.MIN_VALUE
 
-// See https://www.postgresql.org/docs/current/datatype-numeric.html
+// See https://postgresql.org/docs/current/datatype-numeric.html
 const MAX_NUMERIC = '9'.repeat(131_072) + '.' + '9'.repeat(16_383)
 const MIN_NUMERIC = '-' + MAX_NUMERIC
 
@@ -209,37 +209,117 @@ tests[t++] = pool
   })
 
 tests[t++] = pool
-  .run({ sql: `select ${MAX_NUMERIC}::numeric a, ${MIN_NUMERIC}::numeric b, '-1234567890.01234567890'::numeric c` })
+  .run({
+    sql: `
+      select
+        ${MAX_NUMERIC}::numeric a,
+        ${MIN_NUMERIC}::numeric b,
+        '1234567890.01234567890'::numeric c,
+        '1.1'::numeric d,
+        '10.01'::numeric e,
+        '100.001'::numeric f,
+        '1000.0001'::numeric g,
+        '10000.00001'::numeric h,
+        '100000.000001'::numeric i,
+        '1000000.0000001'::numeric j,
+        '10000000.00000001'::numeric k,
+        '100000000.000000001'::numeric l,
+        '1000000000.0000000001'::numeric m,
+        '10000000000.00000000001'::numeric o,
+        '100000000000.000000000001'::numeric p,
+        '1000000000000.0000000000001'::numeric q,
+        '100000000000000000000000000000000000000000000000000000'::numeric r,
+        '0.00000002'::numeric s,
+        '0.123400000000'::numeric t
+    `
+  })
+  .then(({ rows }) => {
+    eq(rows[0].a, MAX_NUMERIC)
+    eq(rows[0].b, MIN_NUMERIC)
+    eq(rows[0].c, '1234567890.01234567890')
+    eq(rows[0].d, '1.1')
+    eq(rows[0].e, '10.01')
+    eq(rows[0].f, '100.001')
+    eq(rows[0].g, '1000.0001')
+    eq(rows[0].h, '10000.00001')
+    eq(rows[0].i, '100000.000001')
+    eq(rows[0].j, '1000000.0000001')
+    eq(rows[0].k, '10000000.00000001')
+    eq(rows[0].l, '100000000.000000001')
+    eq(rows[0].m, '1000000000.0000000001')
+    eq(rows[0].o, '10000000000.00000000001')
+    eq(rows[0].p, '100000000000.000000000001')
+    eq(rows[0].q, '1000000000000.0000000000001')
+    eq(rows[0].r, '100000000000000000000000000000000000000000000000000000')
+    eq(rows[0].s, '0.00000002')
+    eq(rows[0].t, '0.123400000000')
+  })
+
+tests[t++] = pool
+  .run(sql`
+    select
+      ${MAX_NUMERIC}::numeric a,
+      ${MIN_NUMERIC}::numeric b,
+      ${'-1234567890.01234567890'}::numeric c,
+      ${'-1.1'}::numeric d,
+      ${'-10.01'}::numeric e,
+      ${'-100.001'}::numeric f,
+      ${'-1000.0001'}::numeric g,
+      ${'-10000.00001'}::numeric h,
+      ${'-100000.000001'}::numeric i,
+      ${'-1000000.0000001'}::numeric j,
+      ${'-10000000.00000001'}::numeric k,
+      ${'-100000000.000000001'}::numeric l,
+      ${'-1000000000.0000000001'}::numeric m,
+      ${'-10000000000.00000000001'}::numeric o,
+      ${'-100000000000.000000000001'}::numeric p,
+      ${'-1000000000000.0000000000001'}::numeric q,
+      ${'-100000000000000000000000000000000000000000000000000000'}::numeric r,
+      ${'-0.00000002'}::numeric s,
+      ${'-0.123400000000'}::numeric t
+  `)
   .then(({ rows }) => {
     eq(rows[0].a, MAX_NUMERIC)
     eq(rows[0].b, MIN_NUMERIC)
     eq(rows[0].c, '-1234567890.01234567890')
+    eq(rows[0].d, '-1.1')
+    eq(rows[0].e, '-10.01')
+    eq(rows[0].f, '-100.001')
+    eq(rows[0].g, '-1000.0001')
+    eq(rows[0].h, '-10000.00001')
+    eq(rows[0].i, '-100000.000001')
+    eq(rows[0].j, '-1000000.0000001')
+    eq(rows[0].k, '-10000000.00000001')
+    eq(rows[0].l, '-100000000.000000001')
+    eq(rows[0].m, '-1000000000.0000000001')
+    eq(rows[0].o, '-10000000000.00000000001')
+    eq(rows[0].p, '-100000000000.000000000001')
+    eq(rows[0].q, '-1000000000000.0000000000001')
+    eq(rows[0].r, '-100000000000000000000000000000000000000000000000000000')
+    eq(rows[0].s, '-0.00000002')
+    eq(rows[0].t, '-0.123400000000')
   })
 
 tests[t++] = pool
-  .run(sql`select ${MAX_NUMERIC}::numeric a, ${MIN_NUMERIC}::numeric b, ${'-1234567890.01234567890'}::numeric c`)
-  .then(({ rows }) => {
-    eq(rows[0].a, MAX_NUMERIC)
-    eq(rows[0].b, MIN_NUMERIC)
-    eq(rows[0].c, '-1234567890.01234567890')
-  })
-
-tests[t++] = pool
-  .run({ sql: `select 'NaN'::numeric a, '-0'::numeric b, '.5'::numeric c, '-.5'::numeric d` })
+  .run({ sql: `select 'NaN'::numeric a, '0'::numeric b, '-0'::numeric c, '.5'::numeric d, '-.5'::numeric e, '0.0'::numeric f` })
   .then(({ rows }) => {
     eq(rows[0].a, 'NaN')
     eq(rows[0].b, '0')
-    eq(rows[0].c, '0.5')
-    eq(rows[0].d, '-0.5')
+    eq(rows[0].c, '0')
+    eq(rows[0].d, '0.5')
+    eq(rows[0].e, '-0.5')
+    eq(rows[0].f, '0.0')
   })
 
 tests[t++] = pool
-  .run(sql`select ${'NaN'}::numeric a, ${'-0'}::numeric b, ${'.5'}::numeric c, ${'-.5'}::numeric d`)
+  .run(sql`select ${'NaN'}::numeric a, ${'0'}::numeric b, ${'-0'}::numeric c, ${'.5'}::numeric d, ${'-.5'}::numeric e, ${'0.0'}::numeric f`)
   .then(({ rows }) => {
     eq(rows[0].a, 'NaN')
     eq(rows[0].b, '0')
-    eq(rows[0].c, '0.5')
-    eq(rows[0].d, '-0.5')
+    eq(rows[0].c, '0')
+    eq(rows[0].d, '0.5')
+    eq(rows[0].e, '-0.5')
+    eq(rows[0].f, '0.0')
   })
 
 tests[t++] = pool
