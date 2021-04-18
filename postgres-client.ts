@@ -158,8 +158,7 @@ export function sql<R extends Row = Row, P extends ColumnValue[] = ColumnValue[]
 }
 
 interface Connection extends Socket {
-  processId: number
-  cancelKey: number
+  cancelKey: Buffer
   preparedQueries: {
     [queryId: string]: QueryMetadata
   }
@@ -344,8 +343,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
         // const paramValue = readCString(data, 5 + paramName.length + 1)
       }
       else if (msgType === BackendMessage.BackendKeyData) {
-        conn.processId = readInt32(data, 5)
-        conn.cancelKey = readInt32(data, 9)
+        conn.cancelKey = createCancelRequestMessage(readInt32(data, 5), readInt32(data, 9))
       }
       else if (msgType === BackendMessage.ReadyForQuery) {
         if (authOk) {
@@ -679,7 +677,7 @@ function cancelCurrentQuery(conn: Connection, options: PoolOptions): Promise<voi
     })
 
     cancelConn.once('connect', () =>
-      cancelConn.write(createCancelRequestMessage(conn.processId, conn.cancelKey), 'utf8', err => {
+      cancelConn.write(conn.cancelKey, 'utf8', err => {
         if (err) {
           reject(err)
           cancelConn.destroy(err)
@@ -765,13 +763,13 @@ function createStartupMessage(username: string, database: string): Buffer {
   return message
 }
 
-function createCancelRequestMessage(processId: number, cancelKey: number): Buffer {
+function createCancelRequestMessage(processId: number, secretKey: number): Buffer {
   const size = 16
   const message = Buffer.allocUnsafe(size)
   writeInt32(message, size, 0)
   writeInt32(message, 80877102, 4) // Cancel request code
   writeInt32(message, processId, 8)
-  writeInt32(message, cancelKey, 12)
+  writeInt32(message, secretKey, 12)
   return message
 }
 
