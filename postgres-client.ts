@@ -226,7 +226,8 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       const conn = availableConnections.pop()!
       const resultPromise = callback(conn) as CancellablePromise<T>
       resultPromise.finally(() => lendConnection(conn)).catch(() => {})
-      resultPromise.cancel = resultPromise.cancel || (() => {})
+      if (!resultPromise.cancel)
+        resultPromise.cancel = () => {}
       return resultPromise
     }
 
@@ -243,7 +244,8 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
 
       const resultPromise = callback(conn) as CancellablePromise<T>
       resultPromise.finally(() => lendConnection(conn)).catch(() => {})
-      wrappingPromise.cancel = resultPromise.cancel || (() => {})
+      if (resultPromise.cancel)
+        wrappingPromise.cancel = resultPromise.cancel
       return resultPromise
     }) as CancellablePromise<T>
 
