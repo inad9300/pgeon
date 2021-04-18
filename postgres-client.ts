@@ -221,10 +221,11 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       availableConnections.push(conn)
   }
 
-  function borrowConnection<T>(callback: (conn: Connection) => Promise<T>): CancellablePromise<T> {
+  function borrowConnection<T>(callback: (conn: Connection) => Promise<T> | CancellablePromise<T>): CancellablePromise<T> {
     if (availableConnections.length > 0) {
       const conn = availableConnections.pop()!
-      const resultPromise = callback(conn).finally(() => lendConnection(conn)) as CancellablePromise<T>
+      const resultPromise = callback(conn) as CancellablePromise<T>
+      resultPromise.finally(() => lendConnection(conn)).catch(() => {})
       resultPromise.cancel = resultPromise.cancel || (() => {})
       return resultPromise
     }
@@ -236,15 +237,18 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
 
     const connPromise = new Promise<Connection>(resolve => waitingForConnection.push(resolve))
 
-    const resultPromise = connPromise.then(conn => {
+    const wrappingPromise = connPromise.then(conn => {
       if (cancelled)
         throw new QueryCancelledError('Query cancelled during connection acquisition phase.')
 
-      return callback(conn).finally(() => lendConnection(conn))
+      const resultPromise = callback(conn) as CancellablePromise<T>
+      resultPromise.finally(() => lendConnection(conn)).catch(() => {})
+      wrappingPromise.cancel = resultPromise.cancel || (() => {})
+      return resultPromise
     }) as CancellablePromise<T>
 
-    resultPromise.cancel = () => cancelled = true
-    return resultPromise
+    wrappingPromise.cancel = () => cancelled = true
+    return wrappingPromise
   }
 
   return {
