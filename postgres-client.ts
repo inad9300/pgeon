@@ -181,6 +181,7 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   options.queryTimeout   = options.queryTimeout   || 120_000
   options.idleTimeout    = options.idleTimeout    || 300_000
 
+  let openingConnections = 0
   const openConnections: Connection[] = []
   const availableConnections: Connection[] = []
   const waitingForConnection: ((conn: Connection) => void)[] = []
@@ -188,7 +189,8 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
   for (let i = 0; i < options.minConnections; ++i)
     tryOpenConnection()
 
-  function tryOpenConnection(retryDelay = 1) {
+  function tryOpenConnection(retryDelay = 16) {
+    openingConnections++
     openConnection(options as PoolOptions)
       .then(conn => {
         conn.setTimeout(options.idleTimeout!)
@@ -210,8 +212,9 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       })
       .catch(() => {
         if (openConnections.length < options.minConnections!)
-          setTimeout(() => tryOpenConnection(Math.min(1024, options.connectTimeout!, retryDelay * 2)), retryDelay)
+          setTimeout(() => tryOpenConnection(Math.min(4096, options.connectTimeout!, retryDelay * 2)), retryDelay)
       })
+      .finally(() => openingConnections--)
   }
 
   function lendConnection(conn: Connection) {
@@ -231,7 +234,7 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       return resultPromise
     }
 
-    if (openConnections.length < options.maxConnections!)
+    if (openConnections.length + openingConnections < options.maxConnections!)
       tryOpenConnection()
 
     let cancelled = false
@@ -239,8 +242,10 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
     const connPromise = new Promise<Connection>(resolve => waitingForConnection.push(resolve))
 
     const wrappingPromise = connPromise.then(conn => {
-      if (cancelled)
+      if (cancelled) {
+        lendConnection(conn)
         throw new QueryCancelledError('Query cancelled during connection acquisition phase.')
+      }
 
       const resultPromise = callback(conn) as CancellablePromise<T>
       resultPromise.finally(() => lendConnection(conn)).catch(() => {})
@@ -279,11 +284,12 @@ export function newPool(options: Partial<PoolOptions> = {}): Pool {
       for (const conn of openConnections)
         conn.destroy()
 
-      options.minConnections
-        = options.maxConnections
+      openingConnections
+        = openConnections.length
         = waitingForConnection.length
         = availableConnections.length
-        = openConnections.length
+        = options.minConnections
+        = options.maxConnections
         = 0
     }
   }
@@ -453,9 +459,10 @@ function prepareAndRunQuery<R extends Row = Row, P extends ColumnValue[] = Colum
       }
       return queryResult
     } catch (err) {
-      if (cancelled && !(err instanceof QueryCancelledError)) {
+      if (cancelled) {
         try { await cancelledPromise! } catch {}
-        throw new QueryCancelledError(err.message)
+        if (!(err instanceof QueryCancelledError))
+          throw new QueryCancelledError(err.message)
       }
       throw err
     } finally {
