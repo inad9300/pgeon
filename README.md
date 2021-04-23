@@ -134,7 +134,7 @@ db
   })
 ```
 
-TypeScript will emit a regular error, as illustrated below. Notice that all returned values are assumed to be nullable, unless they are known to refer to a non-nullable database column, as Postgres does not offer better information in this area.
+TypeScript will emit a regular error, as illustrated below. Notice that all returned values are assumed to be nullable, unless they are known to refer to a non-nullable database column, as Postgres does not offer better information in this regard.
 
 ```
 ERROR in /example.ts(8,11)
