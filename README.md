@@ -103,7 +103,7 @@ Note that in order to write the webpack configuration in TypeScript, as well as 
 import { Configuration } from 'webpack'
 
 const webpackConfig: Configuration = {
-  entry: './example.ts',
+  entry: './main.ts',
   target: 'node',
   module: {
     rules: [{
