@@ -118,3 +118,25 @@ const webpackConfig: Configuration = {
 
 export default webpackConfig
 ```
+
+As an example, the following code fails at compile time due to the type mismatch it introduces.
+
+```ts
+import { newPool, sql } from './postgres-client'
+
+const db = newPool()
+
+db
+  .run(sql`select 1 as number`)
+  .then(res => {
+    const one: string = res.rows[0].number
+    console.debug(one)
+  })
+```
+
+TypeScript will emit a regular error, as illustrated below. Notice that all returned values are assumed to be nullable, unless they are known to refer to a non-nullable database column, as Postgres does not offer better information in this area.
+
+```
+ERROR in /example.ts(8,11)
+  TS2322: Type 'number | null' is not assignable to type 'string'.
+```
