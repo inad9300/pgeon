@@ -95,7 +95,9 @@ db
 
 ## webpack loader
 
-In order to enable compile-time checks of static SQL queries, the [webpack loader](./webpack-loader.ts) must be run _before_ your TypeScript loader of choice. In webpack, this means placing it _after_ said TypeScript loader in the webpack configuration. Note that in order to write the webpack configuration in TypeScript, as well as to be able to reference loaders written in TypeScript directly, [ts-node](https://github.com/TypeStrong/ts-node) is needed as a dependency.
+In order to enable compile-time checks of static SQL queries, the [webpack loader](./webpack-loader.ts) must be run _before_ your TypeScript loader of choice. In webpack, this means placing it _after_ said TypeScript loader in the webpack configuration.
+
+Note that in order to write the webpack configuration in TypeScript, as well as to be able to reference loaders written in TypeScript directly, [ts-node](https://github.com/TypeStrong/ts-node) is needed as a dependency.
 
 ```ts
 import { Configuration } from 'webpack'
