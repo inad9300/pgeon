@@ -27,7 +27,7 @@ A from-scratch implementation of the Postgres protocol covering most common use 
 - Connection pooling
 - Secure database connections
 - Support for most common data types (with more in the horizon)
-- Strict one-to-one mapping between Postgres and JavaScript types
+- Well-defined mapping between Postgres and JavaScript types
 - Query cancellation
 - Basic transaction management
 - Usage of Postgres' binary data format
