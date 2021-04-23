@@ -128,8 +128,8 @@ const db = newPool()
 
 db
   .run(sql`select 1 as number`)
-  .then(res => {
-    const one: string = res.rows[0].number
+  .then(queryResult => {
+    const one: string = queryResult.rows[0].number
     console.debug(one)
   })
 ```
