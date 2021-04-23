@@ -108,7 +108,7 @@ const webpackConfig: Configuration = {
   module: {
     rules: [{
       test: /\.ts$/,
-      use: ['ts-loader', './webpack-loader.ts']
+      use: ['ts-loader', './node_modules/pgeon/webpack-loader.ts']
     }]
   },
   resolve: {
