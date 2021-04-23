@@ -68,10 +68,10 @@ To prevent SQL injection, template literal placeholders are replaced with Postgr
 import { sql } from 'pgeon'
 import { db } from './db'
 
-const name = 'mirror'
+const name = 'john'
 
 db
-  .run(sql`select * from things where name = ${name}`)
+  .run(sql`select * from people where name = ${name}`)
   .then(queryResult => console.debug(queryResult))
 ```
 
@@ -80,13 +80,13 @@ The same method accepts dynamic queries too. Parameter SQL injection is prevente
 ```ts
 import { db } from './db'
 
-const dynamicCriteria = true ? 'name = $1' : 'description = $1'
+const dynamicCriteria = true ? 'name = $1' : 'nickname = $1'
 
-const name = 'mirror'
+const name = 'john'
 
 db
   .run({
-    sql: `select * from things where ${dynamicCriteria}`,
+    sql: `select * from people where ${dynamicCriteria}`,
     params: [name]
   })
   .then(queryResult => console.debug(queryResult))
