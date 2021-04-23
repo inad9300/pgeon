@@ -26,7 +26,7 @@ For a first look, check out the small [example application](./example.ts) and it
 A from-scratch implementation of the Postgres protocol covering most common use cases. Its features include:
 - Connection pooling
 - Secure database connections
-- Support for most common data types (and more coming soon)
+- Support for most common data types (with more in the horizon)
 - Strict one-to-one mapping between Postgres and JavaScript types
 - Query cancellation
 - Basic transaction management
