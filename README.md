@@ -38,7 +38,7 @@ A from-scratch implementation of the Postgres protocol covering most common use 
 The first step towards executing useful queries is starting a connection pool.
 
 ```ts
-import { newPool } from './node_modules/pgeon/postgres-client'
+import { newPool } from 'pgeon/postgres-client'
 
 export const db = newPool()
 ```
@@ -46,7 +46,7 @@ export const db = newPool()
 If no options are provided, [standard Postgres environmental variables](https://postgresql.org/docs/current/libpq-envars.html) will be read and default values used. Explicit parameters can be provided to configure the database connection and pool limits.
 
 ```ts
-import { newPool } from './node_modules/pgeon/postgres-client'
+import { newPool } from 'pgeon/postgres-client'
 
 export const db = newPool({
   host: 'https://example.org',
@@ -65,7 +65,7 @@ Through a connection pool, queries can be `run()`. Queries with no dynamic parts
 To prevent SQL injection, template literal placeholders are replaced with Postgres query placeholders, and the query is prepared and executed in separate steps.
 
 ```ts
-import { sql } from './node_modules/pgeon/postgres-client'
+import { sql } from 'pgeon/postgres-client'
 import { db } from './db'
 
 const name = 'john'
@@ -108,7 +108,7 @@ const webpackConfig: Configuration = {
   module: {
     rules: [{
       test: /\.ts$/,
-      use: ['ts-loader', './node_modules/pgeon/webpack-loader.ts']
+      use: ['ts-loader', 'pgeon/webpack-loader.ts']
     }]
   },
   resolve: {
@@ -122,7 +122,7 @@ export default webpackConfig
 As an example, the following code fails at compile time due to the type mismatch it introduces.
 
 ```ts
-import { newPool, sql } from './node_modules/pgeon/postgres-client'
+import { newPool, sql } from 'pgeon/postgres-client'
 
 const db = newPool()
 
