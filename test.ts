@@ -21,6 +21,6 @@ const PGHOST = dockerRun('postgres', `--env POSTGRES_PASSWORD=${PGPASSWORD}`).ge
 dockerRun(
    'node',
    `--env PGPASSWORD=${PGPASSWORD} --env PGHOST=${PGHOST}`,
-   `sh -c './node_modules/.bin/tsc && node src/pool.test.js'`
+   `sh -c './node_modules/.bin/tsc && node out/src/pool.test.js'`
 )
 .follow()
