@@ -364,7 +364,7 @@ interface ColumnMetadata {
    positionInTable?: number
 }
 
-enum BackendMessage {
+const enum BackendMessage {
    Authentication           = 82,  // 'R'
    BackendKeyData           = 75,  // 'K'
    BindComplete             = 50,  // '2'

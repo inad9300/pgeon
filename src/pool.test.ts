@@ -66,6 +66,8 @@ tests[t++] = (async () => {
     eq(rows[0].count, expected)
   }
 
+  await pool.run(sql`drop table if exists things`)
+
   await pool.run(sql`create table things (name char(1) primary key)`)
   await countEq(pool, 0)
 
@@ -302,7 +304,7 @@ tests[t++] = pool
   })
 
 tests[t++] = pool
-  .run({ sql: `select 'NaN'::numeric a, '0'::numeric b, '-0'::numeric c, '.5'::numeric d, '-.5'::numeric e, '0.0'::numeric f` })
+  .run({ sql: `select 'NaN'::numeric a, '0'::numeric b, '-0'::numeric c, '.5'::numeric d, '-.5'::numeric e, '0.0'::numeric f, 'Infinity'::numeric g, '-Infinity'::numeric h` })
   .then(({ rows }) => {
     eq(rows[0].a, 'NaN')
     eq(rows[0].b, '0')
@@ -310,10 +312,12 @@ tests[t++] = pool
     eq(rows[0].d, '0.5')
     eq(rows[0].e, '-0.5')
     eq(rows[0].f, '0.0')
+    eq(rows[0].g, 'Infinity')
+    eq(rows[0].h, '-Infinity')
   })
 
 tests[t++] = pool
-  .run(sql`select ${'NaN'}::numeric a, ${'0'}::numeric b, ${'-0'}::numeric c, ${'.5'}::numeric d, ${'-.5'}::numeric e, ${'0.0'}::numeric f`)
+  .run(sql`select ${'NaN'}::numeric a, ${'0'}::numeric b, ${'-0'}::numeric c, ${'.5'}::numeric d, ${'-.5'}::numeric e, ${'0.0'}::numeric f, ${'Infinity'}::numeric g, ${'-Infinity'}::numeric h`)
   .then(({ rows }) => {
     eq(rows[0].a, 'NaN')
     eq(rows[0].b, '0')
@@ -321,6 +325,8 @@ tests[t++] = pool
     eq(rows[0].d, '0.5')
     eq(rows[0].e, '-0.5')
     eq(rows[0].f, '0.0')
+    eq(rows[0].g, 'Infinity')
+    eq(rows[0].h, '-Infinity')
   })
 
 tests[t++] = pool

@@ -284,7 +284,7 @@ function openConnection(options: PoolOptions): Promise<Connection> {
       }
 
       function onError(err: Error) {
-         console.error(err)
+         console.error(err.message)
          reject(err)
          conn.destroy(err)
       }

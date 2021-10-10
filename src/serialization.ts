@@ -247,12 +247,23 @@ function readNumericDigit(buffer: Buffer, idx: number) {
    return readUint16(buffer, 8 + 2 * idx)
 }
 
-// NOTE Postgres 14 may support 'Infinity' and '-Infinity' in numeric fields.
 export function writeNumeric(buffer: Buffer, value: string, offset: number): number {
    if (value === 'NaN') {
       writeUint16(buffer, 0, offset)
       writeInt16(buffer, 0, offset + 2)
       writeUint16(buffer, NumericSign.NaN, offset + 4)
+      return writeUint16(buffer, 0, offset + 6)
+   }
+   else if (value === 'Infinity') {
+      writeUint16(buffer, 0, offset)
+      writeInt16(buffer, 0, offset + 2)
+      writeUint16(buffer, NumericSign.Infinity, offset + 4)
+      return writeUint16(buffer, 0, offset + 6)
+   }
+   else if (value === '-Infinity') {
+      writeUint16(buffer, 0, offset)
+      writeInt16(buffer, 0, offset + 2)
+      writeUint16(buffer, NumericSign.NegativeInfinity, offset + 4)
       return writeUint16(buffer, 0, offset + 6)
    }
 
