@@ -51,12 +51,12 @@ If no options are provided, [standard Postgres environmental variables](https://
 import { newPool } from 'pgeon/postgres-client'
 
 export const db = newPool({
-  host: 'https://example.org',
-  port: 41100,
-  username: 'john_doe',
-  password: 'aV27FGH!!bVxpQyyBukKyQ5&#TzX^)mg5%JzDuZKuA*xi(uh5s)%zZ!2CCY&(@5T',
-  minConnections: 1,
-  maxConnections: 16
+   host: 'https://example.org',
+   port: 41100,
+   username: 'john_doe',
+   password: 'aV27FGH!!bVxpQyyBukKyQ5&#TzX^)mg5%JzDuZKuA*xi(uh5s)%zZ!2CCY&(@5T',
+   minConnections: 1,
+   maxConnections: 16
 })
 ```
 
@@ -73,8 +73,8 @@ import { db } from './db'
 const name = 'john'
 
 db
-  .run(sql`select * from people where name = ${name}`)
-  .then(queryResult => console.debug(queryResult))
+   .run(sql`select * from people where name = ${name}`)
+   .then(queryResult => console.debug(queryResult))
 ```
 
 The same method accepts dynamic queries too. Parameter SQL injection is prevented in the same way as for static queries.
@@ -87,11 +87,11 @@ const dynamicCriteria = true ? 'name = $1' : 'nickname = $1'
 const name = 'john'
 
 db
-  .run({
-    sql: `select * from people where ${dynamicCriteria}`,
-    params: [name]
-  })
-  .then(queryResult => console.debug(queryResult))
+   .run({
+      sql: `select * from people where ${dynamicCriteria}`,
+      params: [name]
+   })
+   .then(queryResult => console.debug(queryResult))
 ```
 
 
@@ -105,17 +105,17 @@ Note that in order to write the webpack configuration in TypeScript, as well as 
 import { Configuration } from 'webpack'
 
 const webpackConfig: Configuration = {
-  entry: './main.ts',
-  target: 'node',
-  module: {
-    rules: [{
-      test: /\.ts$/,
-      use: ['ts-loader', 'pgeon/webpack-loader.ts']
-    }]
-  },
-  resolve: {
-    extensions: ['.ts']
-  }
+   entry: './main.ts',
+   target: 'node',
+   module: {
+      rules: [{
+         test: /\.ts$/,
+         use: ['ts-loader', 'pgeon/webpack-loader.ts']
+      }]
+   },
+   resolve: {
+      extensions: ['.ts']
+   }
 }
 
 export default webpackConfig
@@ -129,11 +129,11 @@ import { newPool, sql } from 'pgeon/postgres-client'
 const db = newPool()
 
 db
-  .run(sql`select 1 as number`)
-  .then(queryResult => {
-    const one: string = queryResult.rows[0].number
-    console.debug(one)
-  })
+   .run(sql`select 1 as number`)
+   .then(queryResult => {
+      const one: string = queryResult.rows[0].number
+      console.debug(one)
+   })
 ```
 
 TypeScript will emit a regular error, as illustrated below. Notice that all returned values are assumed to be nullable, unless they are known to refer to a non-nullable database column, as Postgres does not offer better information in this regard.

@@ -1,5 +1,6 @@
-import { newPool, Client, QueryCancelledError, sql, ObjectId } from './postgres-client'
 import { ok, deepStrictEqual as eq } from 'assert'
+import { newPool, Client, QueryCancelledError, sql } from './pool'
+import { ObjectId } from './ObjectId'
 
 const start = process.hrtime()
 const pool = newPool()

@@ -1,9 +1,0 @@
-dist/
-node_modules/
-
-/.*
-/Dockerfile.*
-/docker-npm
-/example.ts
-/example.webpack.config.ts
-/postgres-client-tests.ts

@@ -1,43 +1,15 @@
 {
-  "name": "pgeon",
-  "version": "0.0.6",
-  "description": "Type-safe Postgres client.",
-  "license": "AGPL-3.0",
-  "homepage": "https://github.com/inad9300/pgeon",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/inad9300/pgeon"
-  },
-  "bugs": {
-    "url": "https://github.com/inad9300/pgeon/issues"
-  },
-  "author": {
-    "name": "Daniel Martín",
-    "email": "inad9300@gmail.com"
-  },
-  "keywords": [
-    "Postgres",
-    "PostgreSQL",
-    "SQL",
-    "Postgres client",
-    "Postgres driver",
-    "type safety",
-    "static analysis",
-    "TypeScript"
-  ],
-  "scripts": {
-    "test": "tsc && node postgres-client-tests.js",
-    "example": "webpack --config example.webpack.config.ts --mode production && node dist/main.js"
-  },
-  "devDependencies": {
-    "@types/node": "14.14.41",
-    "ts-loader": "8.2.0",
-    "ts-node": "9.1.1",
-    "typescript": "4.2.4",
-    "webpack": "5.35.1",
-    "webpack-cli": "4.6.0"
-  },
-  "engines": {
-    "node": ">=14.0.0"
-  }
+   "name": "pgeon",
+   "version": "0.0.6",
+   "license": "AGPL-3.0",
+   "description": "Type-safe Postgres client.",
+   "homepage": "https://github.com/inad9300/pgeon",
+   "scripts": {
+      "test": "./run-ts.js test.ts"
+   },
+   "devDependencies": {
+      "@types/node": "16.10.3",
+      "typescript": "4.4.3"
+   },
+   "files": ["LICENSE", "README.md", "src/"]
 }
