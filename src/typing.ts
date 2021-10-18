@@ -1,54 +1,6 @@
-import { ObjectId } from './ObjectId'
 import { Pool, sql } from './pool'
+import { ObjectId } from './ObjectId'
 import type { QueryMetadata, Row } from './backend'
-
-export function getTypeScriptType(pgType: ObjectId) {
-   switch (pgType) {
-   case ObjectId.Bool:
-      return 'boolean'
-   case ObjectId.Int2:
-   case ObjectId.Int4:
-   case ObjectId.Float4:
-   case ObjectId.Float8:
-   case ObjectId.Oid:
-   case ObjectId.Regproc:
-      return 'number'
-   case ObjectId.Int8:
-      return 'bigint'
-   case ObjectId.Char:
-   case ObjectId.Varchar:
-   case ObjectId.Text:
-   case ObjectId.Bpchar:
-   case ObjectId.Name:
-   case ObjectId.Numeric:
-      return 'string'
-   case ObjectId.CharArray:
-   case ObjectId.VarcharArray:
-   case ObjectId.TextArray:
-   case ObjectId.BpcharArray:
-   case ObjectId.NameArray:
-   case ObjectId.NumericArray:
-      return 'string[]'
-   case ObjectId.Timestamp:
-   case ObjectId.Timestamptz:
-      return 'Date'
-   case ObjectId.Int2Array:
-   case ObjectId.Int4Array:
-   case ObjectId.Float4Array:
-   case ObjectId.Float8Array:
-      return 'number[]'
-   case ObjectId.Int8Array:
-      return 'bigint[]'
-   case ObjectId.Bytea:
-      return 'Buffer'
-   case ObjectId.Json:
-   case ObjectId.Jsonb:
-      return 'any'
-   default:
-      console.warn(`[WARN] Tried mapping an unsupported type to TypeScript: ${ObjectId[pgType] || pgType}`)
-      return 'any'
-   }
-}
 
 export async function getSourceWithQueryTypes(pool: Pool, source: string): Promise<string> {
    const matches = [...source.matchAll(/\bsql(<[^>]+?>)?`((?:\\.|[^`\\])*?)`/g)]
@@ -123,4 +75,52 @@ export async function getRowType(pool: Pool, { rowMetadata }: QueryMetadata): Pr
 
 export function getParamsType({ paramTypes }: QueryMetadata): string {
    return '[' + paramTypes.map(getTypeScriptType).join(', ') + ']'
+}
+
+export function getTypeScriptType(pgType: ObjectId) {
+   switch (pgType) {
+   case ObjectId.Bool:
+      return 'boolean'
+   case ObjectId.Int2:
+   case ObjectId.Int4:
+   case ObjectId.Float4:
+   case ObjectId.Float8:
+   case ObjectId.Oid:
+   case ObjectId.Regproc:
+      return 'number'
+   case ObjectId.Int8:
+      return 'bigint'
+   case ObjectId.Char:
+   case ObjectId.Varchar:
+   case ObjectId.Text:
+   case ObjectId.Bpchar:
+   case ObjectId.Name:
+   case ObjectId.Numeric:
+      return 'string'
+   case ObjectId.CharArray:
+   case ObjectId.VarcharArray:
+   case ObjectId.TextArray:
+   case ObjectId.BpcharArray:
+   case ObjectId.NameArray:
+   case ObjectId.NumericArray:
+      return 'string[]'
+   case ObjectId.Timestamp:
+   case ObjectId.Timestamptz:
+      return 'Date'
+   case ObjectId.Int2Array:
+   case ObjectId.Int4Array:
+   case ObjectId.Float4Array:
+   case ObjectId.Float8Array:
+      return 'number[]'
+   case ObjectId.Int8Array:
+      return 'bigint[]'
+   case ObjectId.Bytea:
+      return 'Buffer'
+   case ObjectId.Json:
+   case ObjectId.Jsonb:
+      return 'any'
+   default:
+      console.warn(`[WARN] Tried mapping an unsupported type to TypeScript: ${ObjectId[pgType] || pgType}`)
+      return 'any'
+   }
 }

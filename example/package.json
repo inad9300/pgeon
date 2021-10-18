@@ -1,8 +1,6 @@
 {
    "private": true,
-   "scripts": {
-      "start": "TS_NODE_SKIP_IGNORE=true webpack --mode production && node dist/main.js"
-   },
+   "scripts": {},
    "dependencies": {
       "pgeon": "0.0.6"
    },
