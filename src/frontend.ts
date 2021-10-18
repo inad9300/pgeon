@@ -204,9 +204,9 @@ export function createBindMessage(queryId: string, params: ColumnValue[], paramT
       const v = params[i]
       const priorOffset = offset
 
-      if (v == null) {
+      if (v == null)
          offset = writeInt32(message, -1, offset)
-      } else {
+      else {
          offset += 4
          switch (paramTypes[i]) {
          case ObjectId.Bool:        offset = writeUint8(message, +(v as boolean), offset) ; break
@@ -293,9 +293,10 @@ function hmac(key: string | Buffer, data: string | Buffer) {
 
 function xor(a: Buffer, b: Buffer) {
    const result = Buffer.allocUnsafe(a.length)
-   for (let i = 0; i < a.length; ++i) {
+
+   for (let i = 0; i < a.length; ++i)
       result[i] = a[i] ^ b[i]
-   }
+
    return result
 }
 
